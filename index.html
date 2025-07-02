@@ -1,0 +1,2997 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard SMTP & Envoi Email Avancé</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --color-primary: #0ff;
+    --color-primary-dark: #0bb;
+    --color-primary-light: #7ff;
+    --color-bg: #0d1117;
+    --color-bg-glass: rgba(13, 17, 23, 0.6);
+    --color-text: #cce7ff;
+    --color-text-muted: #446677;
+    --color-border: #0ff;
+    --color-error-bg: #ff0022;
+    --color-error-text: #ff7799;
+    --transition-time: 0.35s;
+    --font-base: 'Share Tech Mono', monospace;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0 0 130px 0; /* bottom margin for logs fixed height */
+    font-family: var(--font-base);
+    background: var(--color-bg);
+    color: var(--color-text);
+    transition: background-color var(--transition-time), color var(--transition-time);
+  }
+
+  body.dark-mode {
+    background: #05080b;
+    color: #99dfff;
+  }
+
+  header {
+    background: linear-gradient(90deg, #004466 0%, #002233 100%);
+    color: var(--color-primary);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 0 12px var(--color-primary);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    font-size: 1.7rem;
+    user-select: none;
+  }
+
+  #toggleThemeBtn {
+    background: transparent;
+    border: 2px solid var(--color-primary);
+    color: var(--color-primary);
+    padding: 0.4rem 0.9rem;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    user-select: none;
+    transition:
+      background-color var(--transition-time),
+      color var(--transition-time),
+      box-shadow var(--transition-time),
+      transform 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1rem;
+  }
+
+  #toggleThemeBtn:hover,
+  #toggleThemeBtn:focus {
+    background-color: var(--color-primary);
+    color: var(--color-bg);
+    outline: none;
+    box-shadow: 0 0 12px var(--color-primary);
+    transform: scale(1.05);
+  }
+
+  main {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+  }
+
+  /* Onglets */
+  .tabs {
+    display: flex;
+    border-bottom: 2px solid var(--color-primary-dark);
+    gap: 0.75rem;
+    user-select: none;
+  }
+
+  .tab-btn {
+    background: var(--color-bg-glass);
+    border: 1.5px solid var(--color-primary);
+    padding: 0.75rem 1.5rem;
+    font-weight: 700;
+    cursor: pointer;
+    color: var(--color-primary-light);
+    border-radius: 12px 12px 0 0;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    box-shadow:
+      inset 0 0 6px #0ff6,
+      0 0 5px var(--color-primary-light);
+    transition:
+      background-color var(--transition-time),
+      color var(--transition-time),
+      box-shadow var(--transition-time),
+      transform 0.2s ease;
+    position: relative;
+  }
+
+  .tab-btn:hover,
+  .tab-btn:focus-visible {
+    background: linear-gradient(135deg, #00ffff88, #0099ff66);
+    color: white;
+    outline: none;
+    box-shadow:
+      0 0 10px var(--color-primary),
+      inset 0 0 8px var(--color-primary);
+    transform: scale(1.08);
+    z-index: 10;
+  }
+
+  .tab-btn.active {
+    background: linear-gradient(135deg, #00ffffcc, #0099ffcc);
+    color: white;
+    box-shadow:
+      0 0 15px var(--color-primary),
+      inset 0 0 12px var(--color-primary);
+    font-weight: 900;
+    cursor: default;
+    transform: scale(1.1);
+    z-index: 20;
+  }
+
+  /* Contenu des onglets */
+  .tab-content {
+    display: none;
+    background: var(--color-bg-glass);
+    border: 1.5px solid var(--color-primary);
+    border-top: none;
+    border-radius: 0 0 16px 16px;
+    padding: 2rem;
+    box-shadow:
+      0 0 12px var(--color-primary);
+    animation: fadeIn 0.4s ease forwards;
+  }
+
+  .tab-content.active {
+    display: block;
+  }
+
+  @keyframes fadeIn {
+    from {opacity: 0;}
+    to {opacity: 1;}
+  }
+
+/* Zone globale de la liste SMTP */
+#smtpList {
+  margin-top: 1.5rem;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: #f9f9f9; /* fond gris très clair (compatible clair/sombre) */
+  padding: 1rem;
+  font-size: 0.95rem;
+  border: 1px solid #ddd; /* bordure fine pour délimiter */
+}
+
+/* Chaque entrée SMTP */
+#smtpList div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  background: #ffffff; /* fond blanc propre */
+  border: 1px solid #ccc;
+  transition: background-color 0.3s ease;
+  user-select: none;
+  color: #333; /* texte gris foncé */
+  font-weight: 600;
+}
+
+/* Bouton X de suppression */
+#smtpList div button {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s ease;
+}
+
+#smtpList div button:hover {
+  background: #c0392b;
+}
+
+
+  /* Form inputs */
+  textarea,
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="file"] {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 1.2rem;
+    border: 1.5px solid var(--color-primary-light);
+    border-radius: 12px;
+    font-size: 1.05rem;
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--color-text);
+    transition:
+      border-color var(--transition-time),
+      box-shadow var(--transition-time),
+      background-color var(--transition-time);
+    font-family: var(--font-base);
+  }
+
+  textarea:focus,
+  input[type="text"]:focus,
+  input[type="email"]:focus,
+  input[type="number"]:focus,
+  input[type="file"]:focus {
+    border-color: var(--color-primary);
+    outline: none;
+    box-shadow: 0 0 15px var(--color-primary);
+    background: rgba(0, 255, 255, 0.15);
+    color: white;
+  }
+
+  label {
+    font-weight: 700;
+    user-select: none;
+    display: inline-block;
+    margin-bottom: 0.3rem;
+    color: var(--color-primary-light);
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+  }
+
+  /* Buttons */
+  button {
+    padding: 0.75rem 1.5rem;
+    background: var(--color-primary);
+    border: none;
+    border-radius: 16px;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color var(--transition-time),
+      box-shadow var(--transition-time),
+      transform 0.15s ease;
+    box-shadow:
+      0 0 15px var(--color-primary);
+    font-family: var(--font-base);
+    letter-spacing: 1.3px;
+  }
+
+  button:hover:not(:disabled),
+  button:focus-visible:not(:disabled) {
+    background: var(--color-primary-dark);
+    outline: none;
+    box-shadow:
+      0 0 24px var(--color-primary),
+      0 0 6px var(--color-primary);
+    transform: scale(1.05);
+  }
+
+  button:disabled {
+    background: #223344;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  /* Stats */
+  #stats {
+    margin-top: 1.5rem;
+    background: rgba(0, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 1.5rem;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--color-primary-light);
+    box-shadow:
+      0 0 18px var(--color-primary);
+    user-select: none;
+  }
+
+  /* Grid for forms */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(280px,1fr));
+    gap: 1.2rem 2rem;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    main {
+      margin: 1rem 0.8rem;
+      padding: 0 0.5rem;
+    }
+  }
+
+  /* Zone logs fixée en bas */
+  #logsWrapper {
+    background: rgba(0, 0, 0, 0.85);
+    border-top: 3px solid var(--color-primary);
+    box-shadow: 0 -5px 15px var(--color-primary);
+    color: var(--color-primary-light);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9rem;
+    user-select: text;
+    padding: 0.5rem 1rem;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 110px;
+    max-height: 110px;
+  }
+
+  #logsTitle {
+    font-weight: 700;
+    font-size: 1.1rem;
+    user-select: none;
+    color: var(--color-primary);
+  }
+
+  #logsControls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  #clearLogsBtnBottom {
+    flex-shrink: 0;
+    padding: 0.3rem 1rem;
+    background: var(--color-primary);
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    color: var(--color-bg);
+  }
+
+  #clearLogsBtnBottom:hover,
+  #clearLogsBtnBottom:focus {
+    background-color: var(--color-primary-dark);
+    outline: none;
+  }
+
+  #logsBoxBottom {
+    flex-grow: 1;
+    max-height: 70px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    margin: 0;
+    padding: 0 0.5rem;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    border: none;
+  }
+  #exportStats button {
+  padding: 0.5rem 1rem;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 12px;
+  color: var(--color-bg);
+  font-weight: 700;
+  box-shadow: 0 0 10px var(--color-primary);
+  transition: background-color var(--transition-time);
+}
+#exportStats button:hover {
+  background: var(--color-primary-dark);
+}
+#emailBodyEditable {
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  border: 1.5px solid var(--color-primary-light);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--color-text);
+  font-family: var(--font-base);
+  font-size: 1rem;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+/* Container général */
+#ipInfo {
+  background: rgba(0, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 1.5rem 2rem;
+  max-width: 700px;
+  margin: 2rem auto;
+  color: var(--color-primary-light);
+  font-family: var(--font-base);
+  box-shadow: 0 0 18px var(--color-primary);
+  user-select: text;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Titres IP publique et privée */
+#ipInfo h3 {
+  margin: 0.3rem 0 0.8rem 0;
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: var(--color-primary);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Petit texte pays + drapeau */
+#ipPubCountry,
+#ipPrivCountry {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-primary-light);
+}
+
+/* Zone sécurité */
+#securityStatus {
+  margin-top: 1rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1.4;
+  user-select: none;
+}
+
+/* Résumé anonymat */
+#anonymatStatus {
+  margin-top: 1rem;
+  font-size: 1.15rem;
+  letter-spacing: 0.05em;
+  color: var(--color-primary);
+  user-select: none;
+}
+
+/* Tableau blacklist */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1.3rem;
+  font-size: 0.95rem;
+  background: var(--color-bg-glass);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 12px rgba(0,255,255,0.15);
+}
+
+table thead {
+  background: linear-gradient(90deg, #00ffffbb, #0099ffbb);
+  color: #000;
+  user-select: none;
+}
+
+table thead th {
+  padding: 0.8rem 1rem;
+  text-align: left;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+table tbody tr {
+  border-bottom: 1px solid var(--color-primary-light);
+  transition: background-color 0.3s ease;
+}
+
+table tbody tr:hover {
+  background-color: rgba(0, 255, 255, 0.15);
+}
+
+table tbody td {
+  padding: 0.6rem 1rem;
+  vertical-align: middle;
+  color: var(--color-text);
+}
+
+/* Statut blacklisté en rouge, OK en vert */
+table tbody td:nth-child(2) {
+  font-weight: 700;
+}
+
+table tbody td:nth-child(2):contains('Blacklisté'),
+table tbody td:nth-child(2):contains('❌') {
+  color: #ff4c4c;
+}
+
+table tbody td:nth-child(2):contains('OK'),
+table tbody td:nth-child(2):contains('✅') {
+  color: #00cc66;
+}
+
+/* Bouton réanalyser */
+#reanalyzeBtn {
+  margin-top: 1.5rem;
+  background: var(--color-primary);
+  border: none;
+  padding: 0.7rem 1.4rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-family: var(--font-base);
+  font-size: 1.05rem;
+  color: var(--color-bg);
+  cursor: pointer;
+  box-shadow: 0 0 15px var(--color-primary);
+  transition: background-color 0.35s ease, box-shadow 0.35s ease, transform 0.15s ease;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+#reanalyzeBtn:hover,
+#reanalyzeBtn:focus {
+  background-color: var(--color-primary-dark);
+  outline: none;
+  box-shadow: 0 0 24px var(--color-primary), 0 0 8px var(--color-primary);
+  transform: scale(1.05);
+}
+
+/* Style danger overrides */
+#ipInfo.danger {
+  background: #ffdddd;
+  border: 1px solid red;
+  padding: 1rem 2rem;
+  border-radius: 12px;
+}
+
+/* Responsive */
+@media (max-width: 720px) {
+  #ipInfo {
+    padding: 1rem 1.2rem;
+    max-width: 100%;
+  }
+
+  table thead th, table tbody td {
+    padding: 0.5rem 0.7rem;
+  }
+}
+/* Ajout d’un padding top au body pour ne pas cacher le contenu sous la bannière */
+  body {
+    padding-top: 2.4rem; /* environ 38-40px */
+    transition: padding-top 0.3s ease;
+  }
+
+#anonymatStatus.status-high {
+  color: #dc3545; /* rouge */
+  background-color: #f8d7da;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+#anonymatStatus.status-medium {
+  color: #856404; /* orange foncé */
+  background-color: #fff3cd;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+#anonymatStatus.status-low {
+  color: #155724; /* vert foncé */
+  background-color: #d4edda;
+  padding: 10px;
+  border-radius: 5px;
+}
+/* Bouton export */
+#tab-history .export-btn {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+#tab-history .export-btn:hover {
+  background-color: #0056b3;
+}
+
+</style>
+</head>
+<body>
+
+<div id="banner" role="alert" aria-live="polite" style="
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 0.6rem 1rem;
+    font-family: var(--font-base);
+    font-weight: 700;
+    font-size: 1rem;
+    text-align: center;
+    background: var(--color-primary);
+    color: var(--color-bg);
+    box-shadow: 0 2px 8px var(--color-primary-dark);
+    z-index: 100000;
+    display: none;
+    user-select: none;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 0 0 12px 12px;
+  ">
+  <div id="toast" style="
+  visibility: hidden;
+  min-width: 250px;
+  margin-left: -125px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 4px;
+  padding: 14px;
+  position: fixed;
+  z-index: 10000;
+  left: 50%;
+  bottom: 30px;
+  font-size: 16px;
+  opacity: 0;
+  transition: opacity 0.5s, visibility 0.5s;
+"></div>
+
+  </div>
+  
+<!-- Écran de verrouillage licence BACKSENDER -->
+<!-- Écran de verrouillage licence -->
+<div id="licenseLock" style="
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: linear-gradient(145deg, #000, #222); color: white;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  z-index: 9999; text-align: center; padding: 20px;">
+  <h2 style="margin-bottom: 20px;">🔐 Clé de licence BACKSENDER requise</h2>
+  <input id="licenseInput" placeholder="BACKSENDER-XXXXXXXX" style="padding: 12px; width: 280px; font-size: 1em; border-radius: 6px; border: none;" />
+  <button id="validateLicenseBtn" style="margin-top: 12px; padding: 10px 20px; background: #00b894; color: white; border: none; border-radius: 5px;">✔️ Valider</button>
+  <p id="licenseError" style="color: #ff6b6b; display: none; margin-top: 10px;">❌ Clé invalide</p>
+</div>
+
+
+<header>
+  <h1>BlackQuiet Sender V2</h1>  
+  <div id="appContent" style="display:none;">
+    <h1>Bienvenue dans BlackSender</h1>
+</div>
+<button id="toggleThemeBtn" aria-pressed="false" aria-label="Basculer thème clair/sombre">🌙 Thème</button>
+
+</header>
+<!-- BARRE D'INFOS LICENCE & IP -->
+<div id="clientStatusBar" style="
+  margin: 20px auto;
+  max-width: 980px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #1e272e;
+  color: #f5f6fa;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  font-size: 0.9em;
+  font-family: Arial, sans-serif;
+  gap: 20px;
+">
+
+  <!-- À gauche : Licence + Nom -->
+<div style="display: flex; align-items: center; gap: 12px;">
+  <span id="licenseStatusBadge" style="
+    background: #00b894;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: none;
+    font-weight: bold;
+  ">✅ Licence Active</span>
+
+  <span>Utilisateur : <strong id="clientNameDisplay">inconnu</strong></span>
+
+  <!-- 🔓 Déconnexion -->
+  <button id="logoutBtn" style="
+    padding: 6px 10px;
+    background: #d63031;
+    border: none;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+  ">🔓</button>
+</div>
+
+<!-- À droite : IP + Pays + Recharger -->
+<div style="display: flex; align-items: center; gap: 10px;">
+  <div>IP : <strong id="userIp">chargement...</strong></div>
+  <div>Pays : <strong id="userCountry">chargement...</strong></div>
+
+  <!-- 🔁 Recharger IP -->
+  <button id="reanalyzeBtn" style="
+    padding: 6px 10px;
+    background: #0984e3;
+    border: none;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+  ">🔁</button>
+</div>
+
+
+</div>
+
+
+<main>
+  <nav class="tabs" role="tablist" aria-label="Sections du dashboard">
+    <button role="tab" class="tab-btn active" aria-selected="true" tabindex="0" data-tab="tab-smtp" aria-label="Serveurs SMTP">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M3 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H3zM2 3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3z"/>
+        <path d="M5 6h6v1H5V6zm0 2h6v1H5V8z"/>
+      </svg>
+     🔧 Serveurs SMTP
+    </button>
+
+    <button role="tab" class="tab-btn" aria-selected="false" tabindex="-1" data-tab="tab-send" aria-label="Envoi Email">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M15.854.146a.5.5 0 0 0-.707 0L1 14.293V9.5a.5.5 0 0 0-1 0v5.5a.5.5 0 0 0 .5.5H7a.5.5 0 0 0 0-1H2.707L15.854.854a.5.5 0 0 0 0-.708z"/>
+      </svg>
+      📧 Envoi Email
+    </button>
+
+    <button role="tab" class="tab-btn" aria-selected="false" tabindex="-1" data-tab="tab-history" aria-label="Historique">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M8 3a5 5 0 1 0 5 5h-1.5a3.5 3.5 0 1 1-3.5-3.5V3z"/>
+        <path d="M8.5 7.5V5a.5.5 0 0 0-1 0v3h2a.5.5 0 0 0 0-1h-1z"/>
+      </svg>
+      ⏳ Historique
+    </button>
+
+    <button role="tab" class="tab-btn" aria-selected="false" tabindex="-1" data-tab="tab-logs" aria-label="Logs">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M4.5 1a.5.5 0 0 1 .5.5v13a.5.5 0 0 1-1 0v-13a.5.5 0 0 1 .5-.5zM8 1a.5.5 0 0 1 .5.5v13a.5.5 0 0 1-1 0v-13A.5.5 0 0 1 8 1zm3.5 0a.5.5 0 0 1 .5.5v13a.5.5 0 0 1-1 0v-13a.5.5 0 0 1 .5-.5z"/>
+      </svg>
+      📜 Logs
+    </button>
+
+    <button role="tab" class="tab-btn" aria-selected="false" tabindex="-1" data-tab="tab-stats" aria-label="Statistiques">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M0 0h1v15h15v1H0V0z"/>
+        <path d="M3 10h2v5H3v-5zM7 7h2v8H7V7zM11 4h2v11h-2V4z"/>
+      </svg>
+     📊 Statistiques
+    </button>
+
+    <button role="tab" class="tab-btn" aria-selected="false" tabindex="-1" data-tab="tab-setup" aria-label="Setup">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle; margin-right:4px;">
+        <path d="M9.5 1a.5.5 0 0 1 .5.5v2.05a5.97 5.97 0 0 1 2.775 1.49l1.45-1.45a.5.5 0 1 1 .707.708l-1.45 1.45a5.972 5.972 0 0 1 1.49 2.774h2.05a.5.5 0 0 1 0 1h-2.05a5.972 5.972 0 0 1-1.49 2.775l1.45 1.449a.5.5 0 0 1-.707.707l-1.45-1.45a5.97 5.97 0 0 1-2.775 1.49v2.05a.5.5 0 0 1-1 0v-2.05a5.972 5.972 0 0 1-2.774-1.49l-1.45 1.45a.5.5 0 1 1-.708-.707l1.45-1.45a5.972 5.972 0 0 1-1.49-2.775H1.5a.5.5 0 0 1 0-1h2.05a5.972 5.972 0 0 1 1.49-2.774l-1.45-1.45a.5.5 0 0 1 .707-.708l1.45 1.45A5.97 5.97 0 0 1 9.5 3.55V1.5a.5.5 0 0 1 .5-.5z"/>
+      </svg>
+     ⚙️ Setup
+    </button>
+  </nav>
+
+
+
+  <section id="tab-smtp" class="tab-content active" role="tabpanel" tabindex="0" aria-labelledby="tab-smtp">
+  <h2>Gestion des serveurs SMTP</h2>
+
+<label for="bulkSmtpInput">
+  Ajouter des serveurs SMTP en masse (format: host|port|user|pass|quota)
+</label>
+<textarea id="bulkSmtpInput" rows="5" placeholder="smtp.exemple.com|587|user@example.com|motdepasse|100"></textarea>
+
+<div style="margin-top: 10px; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+  <button id="bulkAddBtn">Ajouter en masse</button>
+  <button id="exportConfigBtn">Exporter config SMTP</button>
+
+  <label for="smtpTestReceiver" style="white-space: nowrap; margin-left: auto;">
+    📧 Email test SMTP :
+  </label>
+  <input 
+    type="email" 
+    id="smtpTestReceiver" 
+    placeholder="exemple@test.com" 
+    style="width: 250px;" 
+    aria-label="Adresse email pour recevoir email test SMTP"
+  />
+</div>
+
+
+  <input type="file" id="importConfigInput" accept=".json" aria-label="Importer configuration SMTP JSON" style="margin-top: 10px;" />
+  
+  <div id="smtpList" aria-live="polite" aria-relevant="additions" style="margin-top: 1rem;"></div>
+</section>
+
+
+  <section id="tab-send" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-send">
+    <h2>Envoi d'emails</h2>
+
+    <div class="form-grid">
+      <div style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 20px;">
+  <div style="flex: 1;">
+    <label for="emailTo">📧 Destinataires :</label>
+    <textarea id="emailTo" rows="3" placeholder="exemple@mail.com" style="width: 100%;"></textarea>
+  </div>
+
+  <div>
+    <label for="priorityLevel">🎯 Priorité :</label><br>
+    <select id="priorityLevel" style="padding: 6px; border-radius: 6px;">
+      <option value="3">Haute</option>
+      <option value="2" selected>Moyenne</option>
+      <option value="1">Basse</option>
+    </select>
+  </div>
+</div>
+      <div>
+        <label for="emailSubjects">Sujets (un par ligne, randomisé à l’envoi)</label>
+        <textarea id="emailSubjects" rows="3" placeholder="Sujet 1&#10;Sujet 2"></textarea>
+      </div>
+      <div>
+        <label for="emailFromNames">Noms expéditeur (un par ligne, randomisé)</label>
+        <textarea id="emailFromNames" rows="3" placeholder="Nom 1&#10;Nom 2"></textarea>
+      </div>
+      <div>
+        <label for="fromEmail">Adresse email d’expéditeur (From)</label>
+        <input type="email" id="fromEmail" placeholder="email@exemple.com" />
+      </div>
+	  <div>
+     <label for="replyToEmail">Adresse email Reply-To</label>
+      <input type="email" id="replyToEmail" placeholder="replyto@exemple.com" />
+     </div>
+      <div>
+        <label for="ccInput">CC (séparés par virgule)</label>
+        <input type="text" id="ccInput" placeholder="cc1@mail.com, cc2@mail.com" />
+      </div>
+      <div>
+        <label for="bccInput">BCC (séparés par virgule)</label>
+        <input type="text" id="bccInput" placeholder="bcc1@mail.com, bcc2@mail.com" />
+      </div>
+      <div style="grid-column: 1 / -1;">
+  <label for="emailBodyEditable">Corps du message
+    <small>(template : <code>{{prenom}}</code>, <code>{{date}}</code>)</small>
+  </label>
+
+  <!-- Contrôles style + image -->
+  <div style="margin: 8px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+    <label>Police :
+      <select id="fontSelector">
+        <option value="Arial" selected>Arial</option>
+        <option value="Georgia">Georgia</option>
+        <option value="Tahoma">Tahoma</option>
+        <option value="Verdana">Verdana</option>
+        <option value="'Courier New'">Courier New</option>
+        <option value="'Times New Roman'">Times New Roman</option>
+      </select>
+    </label>
+
+    <label>Couleur :
+      <input type="color" id="colorPicker" value="#000000" />
+    </label>
+
+    <label>Taille :
+      <select id="fontSizeSelector">
+        <option value="12px">Petit</option>
+        <option value="14px" selected>Normal</option>
+        <option value="18px">Grand</option>
+        <option value="24px">Très grand</option>
+      </select>
+    </label>
+
+    <input type="file" id="imageUploader" accept="image/*" style="display: none;">
+    <button type="button" id="addImageBtn" style="background: #f5f5f5; border: 1px solid #ccc; padding: 4px 10px; border-radius: 5px; cursor: pointer;">📷 Ajouter image</button>
+
+    <button type="button" id="resetStyleBtn" style="margin-left: auto; background: #eee; border: 1px solid #ccc; padding: 4px 10px; border-radius: 5px; cursor: pointer;">
+      🔄 Réinitialiser
+    </button>
+<div style="margin-top: 10px;">
+  <input type="file" id="importHtmlInput" accept=".html" hidden>
+  
+  <button type="button" id="importHtmlBtn" style="
+    padding: 8px 14px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+  ">
+    📂 Importer une lettre HTML
+  </button>
+
+  <span id="htmlLoadedStatus" style="
+    display: none;
+    margin-left: 12px;
+    color: #28a745;
+    font-weight: bold;
+    font-size: 14px;
+  ">
+    ✅ HTML chargé avec succès
+  </span>
+</div>
+
+
+
+<!-- Popup Aperçu HTML -->
+<div id="htmlModalPreview" style="display: none; position: fixed; top: 5%; left: 50%; transform: translateX(-50%); width: 80%; max-height: 85%; overflow: auto; background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.4); z-index: 9999; padding: 20px;">
+  <button id="closeHtmlPreview" style="float: right; background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Fermer</button>
+  <h3 style="margin-top: 0;">🔍 Aperçu du HTML importé :</h3>
+  <div id="modalHtmlContent" style="border: 1px solid #eee; padding: 10px; background: #f9f9f9; border-radius: 6px;"></div>
+</div>
+
+
+  </div>
+
+  <!-- Zone éditable -->
+  <div
+    id="emailBodyEditable"
+    contenteditable="true"
+    data-placeholder="Collez une image ici..."
+    style="background-color: white; padding: 12px; border-radius: 8px; min-height: 150px; font-family: Arial, sans-serif; color: #000; font-size: 14px; border: 1px solid #ccc;">
+  </div>
+  <!-- 🔽 AJOUTE CE BLOC ICI : -->
+<div style="margin-top: 10px;">
+  <label>🧩 Insérer un tag :</label>
+  <select id="tagSelector">
+    <option value="">-- Choisir un tag --</option>
+    <option value="##EMAIL##">##EMAIL##</option>
+    <option value="##USERNAME##">##USERNAME##</option>
+    <option value="##DATE##">##DATE##</option>
+    <option value="##PAYS##">##PAYS##</option>
+    <option value="##FAKE_NAME##">##FAKE_NAME##</option>
+    <option value="##FAKE_ADRESS##">##FAKE_ADRESS##</option>
+    <option value="##FAKE_IP##">##FAKE_IP##</option>
+    <option value="##USER_AGENT##">##USER_AGENT##</option>
+    <option value="##COMPANY##">##COMPANY##</option>
+    <option value="##PHONE##">##PHONE##</option>
+	<option value="##NUM3##">##NUM3##</option>
+    <option value="##NUM4##">##NUM4##</option>
+    <option value="##NUM5##">##NUM5##</option>
+    <option value="##NUM8##">##NUM8##</option>
+    <option value="##CART3##">##CART3##</option>
+    <option value="##CART4##">##CART4##</option>
+    <option value="##CART5##">##CART5##</option>
+    <option value="##CART8##">##CART8##</option>
+    <option value="##LINK##">##LINK##</option>
+    <option value="##DATEULTERIEUR##">##DATEULTERIEUR##</option>
+
+  </select>
+  <button id="insertTagBtn">📌 Insérer</button>
+</div>
+<div style="margin-top: 10px;">
+  <label for="textareaLink">🔗 Lien personnalisé pour le tag ##LINK## :</label><br>
+  <textarea id="textareaLink" rows="2" style="width:100%;" placeholder="https://mon-site.com/page..."></textarea>
+</div>
+
+
+      <div style="grid-column: 1 / -1;">
+        <label for="attachmentsInput">Pièces jointes (plusieurs fichiers possibles)</label>
+        <input type="file" id="attachmentsInput" multiple />
+      </div>
+
+<div style="grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: 1rem;">
+
+  <button id="startQueueBtn">🚀 Démarrer envoi</button>
+  <span id="proxyStatus" style="font-weight:bold; color:gray;">🔌 Proxy : désactivé</span>
+
+  <button id="pauseQueueBtn">⏸️ Pause envoi</button>
+
+</div>
+
+
+
+	  <div style="grid-column: 1 / -1; margin-top: 1rem;">
+  <label>Progression de l'envoi</label>
+  <progress id="sendProgress" max="100" value="0" style="width: 100%; height: 20px;"></progress>
+<div id="progressText">Envoyés : 0 / 0 | Échoués : 0</div>
+
+</div>
+
+
+      <div style="grid-column: 1 / -1;">
+        <label for="sendDelay">Délai entre envois (secondes)</label>
+        <input type="number" id="sendDelay" min="0" step="0" value="4" />
+      </div>
+    </div>
+  </section>
+ <section id="tab-history" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-history-btn" aria-live="polite">
+  <h2 id="tab-history-label">Historique des Emails envoyés</h2>
+
+  <button id="exportCsvBtn"> 📄 Exporter CSV</button>
+  <button id="refreshHistoryBtn">🔄 Actualiser</button>
+  <button id="resetHistoryBtn" >♻️ Réinitialiser</button>
+
+  <div style="overflow-x:auto;">
+    <table id="historyTable" role="grid" style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 0.9rem;">
+      <thead style="background-color: #f5f5f5;">
+        <tr>
+          <th style="padding: 8px; border-bottom: 2px solid #ccc;">Email</th>
+          <th style="padding: 8px; border-bottom: 2px solid #ccc;">Statut</th>
+          <th style="padding: 8px; border-bottom: 2px solid #ccc;">Date</th>
+          <th style="padding: 8px; border-bottom: 2px solid #ccc;">Erreur</th>
+          <th style="padding: 8px; border-bottom: 2px solid #ccc;">Délivré</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Rempli dynamiquement -->
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+
+
+  <section id="tab-logs" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-logs">
+    <h2>Journaux / Logs</h2>
+    <button id="clearLogsBtn">Effacer les logs</button>
+    <pre id="logsBox" aria-live="polite" aria-atomic="false" style="max-height: 350px; overflow-y: auto;"></pre>
+  </section>
+
+  <section id="tab-stats" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-stats">
+    <h2>Statistiques d'envoi</h2>
+    <div id="stats">
+      <p>Emails totaux à envoyer: <span id="statTotal">0</span></p>
+      <p>Emails envoyés: <span id="statSent">0</span></p>
+      <p>Emails échoués: <span id="statFail">0</span></p>
+      <p>Emails restants: <span id="statRemaining">0</span></p>
+    </div>
+   <div style="margin-top: 2rem;">
+  <button id="loadCampaignBtn">📥 Charger une campagne JSON</button>
+  <input type="file" id="loadCampaignInput" accept=".json" style="display:none;" />
+  <button id="clearLocalStorageBtn" title="Effacer données locales">Effacer données </button>
+</div>
+
+  </section>
+  <section id="tab-setup" class="tab-content" hidden>
+  <!-- 🔽 Configuration des Proxies -->
+<!-- SECTION PROXY -->
+<section id="proxy-section" style="margin-top: 20px; font-family: sans-serif;">
+  <h2 style="font-size: 1.1rem;">🔐 Gestion des Proxies</h2>
+
+  <label for="proxyInput" style="font-weight: bold; display: block; margin-bottom: 6px;">
+    Coller les proxies (format : <code>type|host|port</code>)
+  </label>
+
+  <textarea id="proxyInput"
+            rows="6"
+            placeholder="socks5|127.0.0.1|9050\nhttp|123.45.67.89|8080"
+            style="width: 100%; font-size: 0.9rem; padding: 8px; border: 1px solid #ccc; border-radius: 5px; resize: vertical;"></textarea>
+
+  <div style="margin-top: 10px;">
+    <button id="saveProxiesBtn" style="padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+      💾 Enregistrer les proxies
+    </button>
+	<!-- Ajoute ce bouton près du bouton Enregistrer les proxies -->
+<button id="disableProxiesBtn" style="margin-left: 1rem; background: #f44336; color: white;">Désactiver proxy</button>
+
+
+    <button id="testProxiesBtn" style="padding: 6px 12px; margin-left: 1rem; border-radius: 4px; cursor: pointer;">
+      🧪 Tester chaque proxy
+    </button>
+  </div>
+
+  <pre id="proxyTestLogs"
+       style="margin-top: 15px; max-height: 200px; overflow-y: auto; background: #f8f8f8; color: #222; padding: 10px; border: 1px solid #ddd; border-radius: 5px; white-space: pre-wrap; font-size: 0.85rem;"></pre>
+</section>
+
+  
+  <h2>Setup - Infos IP & Sécurité</h2>
+
+  <button id="toggleIpInfo">Afficher / Masquer détails IP</button>
+
+<div id="ipDetails" style="display:none;">
+  <h3>IP publique: <span id="ipPub">...</span> <small id="ipPubCountry">...</small></h3>
+  <table border="1" style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr><th>Service DNSBL</th><th>Statut</th></tr>
+    </thead>
+    <tbody id="blacklistTableBody">
+      <tr><td colspan="2" style="text-align:center;">Chargement...</td></tr>
+    </tbody>
+  </table>
+  <div id="anonymatStatus" style="margin-top:10px; font-weight:bold;"></div>
+  <button id="reanalyzeBtn" style="margin-top:10px;">Réanalyser</button>
+</div>
+
+<div id="banner" style="margin-top:10px; padding:10px; display:none; font-weight:bold;"></div>
+
+
+</section>
+
+
+
+</main>
+
+<!-- Zone logs fixée en bas -->
+<div id="logsWrapper" aria-live="polite" aria-atomic="false" role="region" aria-label="Zone des journaux et logs">
+  <div id="logsTitle">Journaux / Logs</div>
+  <div id="logsControls">
+    <button id="clearLogsBtnBottom" aria-label="Effacer les logs">Effacer Logs</button>
+    <pre id="logsBoxBottom" tabindex="0" aria-label="Zone des logs"></pre>
+  </div>
+</div>
+
+<script>
+let proxyList = [];
+
+// Met à jour l'affichage du statut proxy
+function updateProxyStatus() {
+  const statusEl = document.getElementById("proxyStatus");
+  if (proxyList.length > 0) {
+    const first = proxyList[0];
+    statusEl.textContent = `🔐 Proxy actif (${first.type.toUpperCase()}://${first.host}:${first.port})`;
+    statusEl.style.color = "green";
+  } else {
+    statusEl.textContent = "🔌 Proxy : désactivé";
+    statusEl.style.color = "gray";
+  }
+}
+
+// Chargement initial du statut proxy au chargement de la page
+window.addEventListener("load", () => {
+  updateProxyStatus();
+});
+
+// Enregistrer les proxies depuis textarea
+document.getElementById("saveProxiesBtn")?.addEventListener("click", () => {
+  const raw = document.getElementById("proxyInput").value.trim();
+  const lines = raw.split(/\n+/).map(l => l.trim()).filter(Boolean);
+
+  proxyList = lines.map(line => {
+    const parts = line.split("|");
+    if(parts.length !== 3){
+      alert(`Format invalide proxy: "${line}". Doit être type|host|port`);
+      return null;
+    }
+    const [type, host, portStr] = parts;
+    const port = parseInt(portStr);
+    if (isNaN(port)) {
+      alert(`Port invalide proxy: "${line}"`);
+      return null;
+    }
+    return { type: type.trim(), host: host.trim(), port };
+  }).filter(p => p !== null);
+
+  fetch("/save_proxies", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proxies: proxyList })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert("✅ Proxies enregistrés !");
+      updateProxyStatus();
+    } else {
+      alert("❌ Erreur lors de l’enregistrement des proxies.");
+    }
+  })
+  .catch(() => alert("❌ Erreur réseau lors de l'enregistrement des proxies."));
+});
+
+// Désactiver proxy (vider liste et serveur)
+document.getElementById("disableProxiesBtn")?.addEventListener("click", () => {
+  proxyList = [];
+
+  fetch("/save_proxies", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proxies: [] })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert("🚫 Proxies désactivés !");
+      updateProxyStatus();
+    } else {
+      alert("❌ Échec lors de la désactivation des proxies.");
+    }
+  })
+  .catch(() => alert("❌ Erreur réseau lors de la désactivation des proxies."));
+});
+
+// Tester les proxies (optionnel)
+document.getElementById("testProxiesBtn")?.addEventListener("click", async () => {
+  const logEl = document.getElementById("proxyTestLogs");
+  logEl.textContent = "⏳ Test des proxies en cours...\n";
+
+  for (let proxy of proxyList) {
+    const { type, host, port } = proxy;
+    logEl.textContent += `🔌 Test du proxy ${type}|${host}|${port} ... `;
+
+    try {
+      const res = await fetch("/test_proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, host, port })
+      });
+      const result = await res.json();
+      if (result.success) {
+        logEl.textContent += "✅ Succès\n";
+      } else {
+        logEl.textContent += `❌ Échec : ${result.error}\n`;
+      }
+    } catch (err) {
+      logEl.textContent += `❌ Erreur réseau\n`;
+    }
+  }
+
+  logEl.textContent += "\n✅ Test terminé.";
+});
+</script>
+
+
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  // === Variables ===
+  const licenseLock = document.getElementById("licenseLock");
+  const licenseInput = document.getElementById("licenseInput");
+  const validateLicenseBtn = document.getElementById("validateLicenseBtn");
+  const licenseError = document.getElementById("licenseError");
+  const clientNameDisplay = document.getElementById("clientNameDisplay");
+  const licenseStatusBadge = document.getElementById("licenseStatusBadge");
+
+  let licenseData = {};
+
+  // === Charger les licences depuis le fichier distant ===
+  async function fetchLicenses() {
+    try {
+      const res = await fetch("https://gist.githubusercontent.com/BlackQuiet/82c36f2a783d549f201860428adb1b23/raw/a8a72958cf55c661223a5f22f1bdcc9fb28a9752/licenses.json");
+      if (!res.ok) throw new Error("Erreur réseau");
+      licenseData = await res.json();
+    } catch (err) {
+      alert("❌ Impossible de vérifier la licence.\nVeuillez vérifier votre connexion.");
+    }
+  }
+
+  // === Valider la licence saisie ===
+  function verifyLicenseKey() {
+    const key = licenseInput.value.trim().toUpperCase();
+    if (licenseData[key]) {
+      localStorage.setItem("backsender_license", key);
+      localStorage.setItem("backsender_client", licenseData[key]);
+      updateUIAfterLicense();
+    } else {
+      licenseError.style.display = "block";
+    }
+  }
+
+  // === Mettre à jour l'interface après validation ===
+  function updateUIAfterLicense() {
+    const key = localStorage.getItem("backsender_license");
+    const clientName = localStorage.getItem("backsender_client");
+
+    if (key && clientName && licenseData[key]) {
+      licenseLock.style.display = "none";
+      if (clientNameDisplay) clientNameDisplay.textContent = clientName;
+      if (licenseStatusBadge) licenseStatusBadge.style.display = "inline-block";
+    } else {
+      licenseLock.style.display = "flex";
+    }
+  }
+
+  // === Initialisation ===
+  async function init() {
+    await fetchLicenses();
+    const savedKey = localStorage.getItem("backsender_license");
+    const savedClient = localStorage.getItem("backsender_client");
+
+    if (savedKey && licenseData[savedKey]) {
+      updateUIAfterLicense();
+    } else {
+      licenseLock.style.display = "flex";
+    }
+  }
+
+  // === Événement : clic sur "Valider" ===
+  validateLicenseBtn.addEventListener("click", verifyLicenseKey);
+
+  // === Lancer l’app ===
+  init();
+});
+</script>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const ipElem = document.getElementById("userIp");
+  const countryElem = document.getElementById("userCountry");
+
+  function fetchIPInfo() {
+    fetch("https://ipapi.co/json/")
+      .then(res => res.json())
+      .then(data => {
+        ipElem.textContent = data.ip || "indisponible";
+        countryElem.textContent = data.country_name || "inconnu";
+      })
+      .catch(() => {
+        ipElem.textContent = "erreur IP";
+        countryElem.textContent = "erreur";
+      });
+  }
+
+  document.getElementById("reanalyzeBtn").addEventListener("click", fetchIPInfo);
+  fetchIPInfo();
+
+  const savedClient = localStorage.getItem("backsender_client");
+  const licenseBadge = document.getElementById("licenseStatusBadge");
+  const clientNameDisplay = document.getElementById("clientNameDisplay");
+
+  if (savedClient) {
+    clientNameDisplay.textContent = savedClient;
+    licenseBadge.style.display = "inline-block";
+  } else {
+    clientNameDisplay.textContent = "inconnu";
+    licenseBadge.style.display = "none";
+  }
+
+  // 🔓 Déconnexion = efface licence et recharge page
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+    if (confirm("Voulez-vous vraiment vous déconnecter ?")) {
+      localStorage.removeItem("backsender_client");
+      localStorage.removeItem("backsender_license");
+      location.reload(); // Recharge la page pour afficher le verrou
+    }
+  });
+});
+</script>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  // === Éléments DOM ===
+  const emailBodyEditable = document.getElementById('emailBodyEditable');
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const tabContents = document.querySelectorAll(".tab-content");
+  const toggleThemeBtn = document.getElementById("toggleThemeBtn");
+
+  const smtpListDiv = document.getElementById("smtpList");
+  const bulkSmtpInput = document.getElementById("bulkSmtpInput");
+  const bulkAddBtn = document.getElementById("bulkAddBtn");
+  const exportConfigBtn = document.getElementById("exportConfigBtn");
+  const importConfigInput = document.getElementById("importConfigInput");
+
+  const emailToInput = document.getElementById("emailTo");
+  const fromEmailInput = document.getElementById("fromEmail");
+  const emailSubjectsInput = document.getElementById("emailSubjects");
+  const emailFromNamesInput = document.getElementById("emailFromNames");
+
+  const ccInput = document.getElementById("ccInput");
+  const bccInput = document.getElementById("bccInput");
+
+  const attachmentsInput = document.getElementById("attachmentsInput");
+
+  const startQueueBtn = document.getElementById("startQueueBtn");
+  const pauseQueueBtn = document.getElementById("pauseQueueBtn");
+
+  const logsBox = document.getElementById("logsBox");
+  const logsBoxBottom = document.getElementById("logsBoxBottom");
+  const clearLogsBtn = document.getElementById("clearLogsBtn");
+  const clearLogsBtnBottom = document.getElementById("clearLogsBtnBottom");
+
+  const sendDelayInput = document.getElementById("sendDelay");
+
+  const statTotal = document.getElementById("statTotal");
+  const statSent = document.getElementById("statSent");
+  const statFail = document.getElementById("statFail");
+  const statRemaining = document.getElementById("statRemaining");
+
+  const loadCampaignBtn = document.getElementById("loadCampaignBtn");
+  const loadCampaignInput = document.getElementById("loadCampaignInput");
+  const replyToInput = document.getElementById("replyToEmail");
+
+  const progressBar = document.getElementById("sendProgress");
+  const progressText = document.getElementById("progressText");
+
+  // === Variables de contrôle ===
+  let smtpServers = [];
+  let sendQueue = [];
+  let sending = false;
+  let paused = false;
+
+  let totalEmails = 0;
+  let sentCount = 0;
+  let failCount = 0;
+
+  const failedEmails = [];
+  const notSentEmails = [];
+  const sentEmails = [];
+  
+  // === Fonctions utilitaires ===
+
+  function appendLog(text) {
+    const now = new Date().toLocaleTimeString();
+    const line = `[${now}] ${text}`;
+    logsBox.textContent += line + "\n";
+    logsBoxBottom.textContent += line + "\n";
+
+    logsBox.scrollTop = logsBox.scrollHeight;
+    logsBoxBottom.scrollTop = logsBoxBottom.scrollHeight;
+
+// Limiter la taille des logs
+    if (logsBox.textContent.split("\n").length > 1000)
+      logsBox.textContent = logsBox.textContent.split("\n").slice(-1000).join("\n");
+    if (logsBoxBottom.textContent.split("\n").length > 1000)
+      logsBoxBottom.textContent = logsBoxBottom.textContent.split("\n").slice(-1000).join("\n");
+  }
+
+  function validateEmail(email) {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email.trim());
+  }
+
+  function parseEmails(text) {
+    return text
+      .split(/\r?\n|,/)
+      .map(e => e.trim())
+      .filter(e => e.length > 0 && validateEmail(e));
+  }
+
+  function pickRandom(arr) {
+    if (!arr.length) return null;
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function smtpExists(host, port, user) {
+    return smtpServers.some(s => s.host === host && s.port === port && s.user === user);
+  }
+
+  function cleanInvalidSmtp() {
+    smtpServers = smtpServers.filter(s => s.valid);
+  }
+
+  function renderSmtpList() {
+    cleanInvalidSmtp();
+    if (smtpServers.length === 0) {
+      smtpListDiv.innerHTML = "<em>Aucun serveur SMTP valide configuré.</em>";
+      return;
+    }
+    smtpListDiv.innerHTML = "";
+    smtpServers.forEach((s, i) => {
+  const quotaMax = s.quota || 1500; // Définit un quota par défaut à 1500
+  const sent = s.sentToday || 0;
+  const statusClass = s.valid ? "status-valid" : "status-invalid";
+  const statusText = s.valid
+    ? `✅ Valide (Envoyés aujourd’hui : ${sent}/${quotaMax})`
+    : "❌ Désactivé";
+
+  const div = document.createElement("div");
+  div.style = `
+    margin-bottom: 8px;
+    padding: 10px;
+    background: ${s.valid ? "#eef6ff" : "#ffe6e6"};
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.95rem;
+  `;
+
+  div.innerHTML = `
+    <div>
+      <strong>${s.host}</strong> (${s.port}) - ${s.user}
+      <br><small class="${statusClass}">${statusText}</small>
+    </div>
+    <button aria-label="Supprimer SMTP" data-index="${i}" style="background:#d9534f;color:white;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;">X</button>
+  `;
+
+  smtpListDiv.appendChild(div);
+
+  div.querySelector("button").addEventListener("click", () => {
+    smtpServers.splice(i, 1);
+    appendLog(`Serveur SMTP supprimé : ${s.host}`);
+    renderSmtpList();
+  });
+});
+
+  }
+
+  // === Gestion collage image dans emailBodyEditable ===
+  if (emailBodyEditable) {
+    emailBodyEditable.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+      for (const item of items) {
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const img = document.createElement('img');
+            img.src = event.target.result;
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.display = 'block';
+            img.style.margin = '8px 0';
+            insertImageAtCursor(img);
+          };
+          reader.readAsDataURL(blob);
+          e.preventDefault();
+          return;
+        }
+      }
+    });
+  }
+
+  function insertImageAtCursor(img) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) {
+      emailBodyEditable.appendChild(img);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // === Gestion onglets accessibles ===
+  tabButtons.forEach(button => {
+    button.addEventListener("click", () => {
+      tabButtons.forEach(btn => {
+        btn.classList.remove("active");
+        btn.setAttribute("aria-selected", "false");
+        btn.setAttribute("tabindex", "-1");
+      });
+      tabContents.forEach(content => {
+        content.classList.remove("active");
+        content.hidden = true;
+      });
+      button.classList.add("active");
+      button.setAttribute("aria-selected", "true");
+      button.setAttribute("tabindex", "0");
+      const tabId = button.getAttribute("data-tab");
+      const tabToShow = document.getElementById(tabId);
+      if (tabToShow) {
+        tabToShow.classList.add("active");
+        tabToShow.hidden = false;
+        tabToShow.focus();
+      }
+    });
+  });
+  if (tabButtons.length > 0) tabButtons[0].click();
+
+  // === Toggle thème persistant ===
+  function applyTheme(theme) {
+    if (theme === "dark") {
+      document.body.classList.add("dark-mode");
+      toggleThemeBtn.setAttribute("aria-pressed", "true");
+      toggleThemeBtn.textContent = "☀️ Thème";
+    } else {
+      document.body.classList.remove("dark-mode");
+      toggleThemeBtn.setAttribute("aria-pressed", "false");
+      toggleThemeBtn.textContent = "🌙 Thème";
+    }
+  }
+  if (toggleThemeBtn) {
+    toggleThemeBtn.addEventListener("click", () => {
+      const isDark = document.body.classList.toggle("dark-mode");
+      toggleThemeBtn.setAttribute("aria-pressed", isDark.toString());
+      toggleThemeBtn.textContent = isDark ? "☀️ Thème" : "🌙 Thème";
+      localStorage.setItem("preferredTheme", isDark ? "dark" : "light");
+    });
+    const savedTheme = localStorage.getItem("preferredTheme");
+    if (savedTheme) applyTheme(savedTheme);
+  }
+
+  // === Test SMTP via API backend ===
+async function testSmtpAndAdd(host, port, user, pass, quota = 1500) {
+  if (smtpExists(host, parseInt(port), user)) {
+    appendLog(`SMTP déjà ajouté : ${host}:${port} (${user}) — Ignoré`);
+    return;
+  }
+  appendLog(`Test SMTP: ${host}:${port} (${user})...`);
+  try {
+    const res = await fetch("/test_smtp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host, port: parseInt(port), user, pass }),
+    });
+    const data = await res.json();
+    const valid = data.success;
+    if (!valid) {
+      appendLog(`❌ SMTP invalide: ${host} - Ne sera pas ajouté.`);
+      return;
+    }
+
+    const smtp = {
+      host,
+      port: parseInt(port),
+      user,
+      pass,
+      valid,
+      quota: parseInt(quota) || 1500,
+      sentToday: 0,
+      failedCount: 0,
+      lastFailTime: 0,
+    };
+    smtpServers.push(smtp);
+    appendLog(`✅ SMTP valide ajouté : ${host}`);
+    renderSmtpList();
+
+    // Envoi de l'email test si adresse fournie
+    const testEmailInput = document.getElementById('testEmail');
+    const testEmailAddress = testEmailInput ? testEmailInput.value.trim() : "";
+    if (testEmailAddress && validateEmail(testEmailAddress)) {
+      await sendTestEmail(smtp, testEmailAddress);
+    } else if (testEmailAddress) {
+      appendLog(`⚠️ Email test invalide, email test non envoyé.`);
+    }
+
+  } catch (e) {
+    appendLog(`❌ Erreur test SMTP: ${e.message}`);
+  }
+}
+async function sendTestEmail(smtp, toEmail) {
+  try {
+    // Corps de l’email test (tu peux personnaliser)
+    const subject = "Test SMTP - BlackSender V3";
+    const body = `
+      <p>Ceci est un email de test envoyé via le serveur SMTP <strong>${smtp.host}</strong>.</p>
+      <p>Si vous recevez ce message, le serveur SMTP fonctionne correctement.</p>
+    `;
+
+    const formData = new FormData();
+    formData.append('smtp_host', smtp.host);
+    formData.append('smtp_port', smtp.port);
+    formData.append('smtp_user', smtp.user);
+    formData.append('smtp_pass', smtp.pass);
+    formData.append('from_name', 'Test SMTP');
+    formData.append('from_email', smtp.user);
+    formData.append('to', toEmail);
+    formData.append('subject', subject);
+    formData.append('body', body);
+
+    const res = await fetch('/send_email', {
+      method: 'POST',
+      body: formData,
+    });
+    const result = await res.json();
+
+    if (result.success) {
+      appendLog(`✅ Email test envoyé à ${toEmail} via ${smtp.host}`);
+    } else {
+      appendLog(`❌ Échec email test SMTP ${smtp.host}: ${result.error}`);
+    }
+  } catch (error) {
+    appendLog(`❌ Erreur envoi email test SMTP ${smtp.host}: ${error.message}`);
+  }
+}
+
+
+  bulkAddBtn.addEventListener("click", async () => {
+    const lines = bulkSmtpInput.value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const parts = line.split("|");
+      if (parts.length < 4) {
+        appendLog(`Ligne invalide (attendu 4-5 parties) : ${line}`);
+        continue;
+      }
+      const [host, port, user, pass, quota] = parts;
+      await testSmtpAndAdd(host, port, user, pass, quota);
+    }
+  });
+
+  // === Fonctions d’envoi ===
+
+  function applyTemplateVars(template, vars) {
+    return template.replace(/{{\s*([\w]+)\s*}}/g, (_, key) => vars[key] ?? "");
+  }
+
+  function getAttachments() {
+    if (!attachmentsInput) return [];
+    const files = attachmentsInput.files;
+    if (!files.length) return [];
+    return Array.from(files);
+  }
+
+  async function sendEmail(
+    smtp,
+    email,
+    subject,
+    fromName,
+    fromEmail,
+    ccList,
+    bccList,
+    body,
+    replyTo,
+    attachments,
+    dynamicVars
+  ) {
+    const processedBody = applyTemplateVars(body, dynamicVars);
+
+    const formData = new FormData();
+    formData.append("smtp_host", smtp.host);
+    formData.append("smtp_port", smtp.port);
+    formData.append("smtp_user", smtp.user);
+    formData.append("smtp_pass", smtp.pass);
+    formData.append("from_name", fromName);
+    formData.append("to", email);
+    formData.append("subject", subject);
+    formData.append("body", processedBody);
+    formData.append("useTls", true);
+    formData.append("replyTo", replyTo || "");
+    formData.append("from_email", fromEmail || smtp.user);
+	
+	// Ajout du champ dynamique ##LINK## provenant du textarea
+    formData.append("link", document.getElementById('textareaLink')?.value || '');
+
+
+    if (ccList.length) formData.append("cc", ccList.join(","));
+    if (bccList.length) formData.append("bcc", bccList.join(","));
+
+    attachments.forEach((file, idx) => {
+      formData.append(`attachment_${idx}`, file, file.name);
+    });
+
+    try {
+      const res = await fetch("/send_email", { method: "POST", body: formData });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  function selectBestSmtp() {
+    const now = Date.now();
+    const available = smtpServers.filter(
+      s => s.valid && (s.sentToday || 0) < (s.quota || 100) && (now - (s.lastFailTime || 0) > 10 * 60 * 1000)
+    );
+    if (!available.length) return null;
+
+    available.sort(
+      (a, b) => (a.failedCount || 0) - (b.failedCount || 0) || (a.sentToday || 0) - (b.sentToday || 0)
+    );
+    return available[0];
+  }
+
+  function updateStats() {
+    statTotal.textContent = totalEmails.toString();
+    statSent.textContent = sentCount.toString();
+    statFail.textContent = failCount.toString();
+    statRemaining.textContent = (totalEmails - sentCount - failCount).toString();
+
+    if (progressBar && progressText) {
+      progressBar.max = totalEmails;
+      progressBar.value = sentCount + failCount;
+      progressText.textContent = `Envoyés : ${sentCount} / ${totalEmails} | Échoués : ${failCount}`;
+    }
+  }
+
+  async function processQueue() {
+    if (sending || paused) return;
+    sending = true;
+
+    while (sendQueue.length && !paused) {
+      const item = sendQueue.shift();
+
+      const smtp = selectBestSmtp();
+      if (!smtp) {
+        appendLog("⚠️ Aucun serveur SMTP valide disponible. Pause automatique.");
+        paused = true;
+        break;
+      }
+
+      const subject = pickRandom(item.subjects) || "(Sans sujet)";
+      const fromName = pickRandom(item.fromNames) || fromEmailInput.value.trim() || smtp.user;
+
+      let fromEmail = item.fromEmail?.trim();
+      if (fromEmail && !validateEmail(fromEmail)) {
+        appendLog(`❌ FromEmail invalide: ${fromEmail}. Utilisation du user SMTP.`);
+        fromEmail = smtp.user;
+      } else if (!fromEmail) {
+        fromEmail = smtp.user;
+      }
+
+      appendLog(`Envoi à ${item.email} via SMTP ${smtp.host} | Sujet: "${subject}" | FromName: "${fromName}" | FromEmail: "${fromEmail}"`);
+
+      const res = await sendEmail(
+        smtp,
+        item.email,
+        subject,
+        fromName,
+        fromEmail,
+        item.ccList,
+        item.bccList,
+        item.body,
+        item.replyTo,
+        item.attachments,
+        item.dynamicVars
+      );
+
+      if (res.success) {
+        appendLog(`✅ Email envoyé à ${item.email}`);
+        sentCount++;
+        sentEmails.push(item.email);
+        smtp.sentToday = (smtp.sentToday || 0) + 1;
+        smtp.failedCount = 0;
+      } else {
+        appendLog(`❌ Échec à ${item.email}: ${res.error}`);
+        failCount++;
+        failedEmails.push(item.email);
+        notSentEmails.push(item.email);
+        smtp.failedCount = (smtp.failedCount || 0) + 1;
+        smtp.lastFailTime = Date.now();
+        if (smtp.failedCount >= 5) {
+          smtp.valid = false;
+          appendLog(`🛑 SMTP ${smtp.host} désactivé temporairement après 5 échecs.`);
+        }
+      }
+
+      updateStats();
+      renderSmtpList();
+
+      const delayMs = parseFloat(sendDelayInput.value) * 1000 || 1000;
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+
+    sending = false;
+    if (sendQueue.length === 0) {
+      appendLog(`📬 Envoi terminé. Succès: ${sentCount}, Échecs: ${failCount}`);
+      appendLog("💾 Sauvegarde de fin de campagne...");
+      const nowEndStr = new Date().toISOString().replace(/[:T]/g, "-").split(".")[0];
+      saveCampaignSnapshot("campagne-finale-" + nowEndStr + ".json");
+      alert(`Envoi terminé.\nSuccès: ${sentCount}\nÉchecs: ${failCount}`);
+    }
+  }
+  function getProxySettings() {
+  const mode = document.querySelector('input[name="proxyMode"]:checked').value;
+
+  if (mode === 'tor') {
+    return {
+      type: "socks5",
+      host: "127.0.0.1",
+      port: 9050
+    };
+  }
+
+  if (mode === 'custom') {
+    const hostPort = document.getElementById('customProxy').value.trim();
+    const [host, portStr] = hostPort.split(':');
+    const username = document.getElementById('customProxyUser').value.trim();
+    const password = document.getElementById('customProxyPass').value.trim();
+
+    if (!host || !portStr) return null;
+
+    return {
+      type: "socks5",
+      host: host,
+      port: parseInt(portStr),
+      username: username || undefined,
+      password: password || undefined
+    };
+  }
+
+  return null; // mode: "none"
+}
+
+
+  // === Gestion démarrage envoi ===
+  startQueueBtn.addEventListener("click", () => {
+    if (sending) {
+      appendLog("⚠️ Envoi déjà en cours.");
+      return;
+    }
+    const emailsRaw = emailToInput.value.trim();
+    if (!emailsRaw) {
+      alert("Veuillez entrer au moins un destinataire valide.");
+      return;
+    }
+
+    const emails = parseEmails(emailsRaw);
+    if (emails.length === 0) {
+      alert("Aucun destinataire valide trouvé.");
+      return;
+    }
+
+    totalEmails = emails.length;
+    sentCount = 0;
+    failCount = 0;
+    failedEmails.length = 0;
+    notSentEmails.length = 0;
+    sentEmails.length = 0;
+
+    const subjectsRaw = emailSubjectsInput.value.trim();
+    const subjects = subjectsRaw ? subjectsRaw.split(/\r?\n/).filter(Boolean) : ["(Sans sujet)"];
+
+    const fromNamesRaw = emailFromNamesInput.value.trim();
+    const fromNames = fromNamesRaw ? fromNamesRaw.split(/\r?\n/).filter(Boolean) : [];
+
+    const ccRaw = ccInput.value.trim();
+    const ccList = ccRaw ? ccRaw.split(/[,;\s]+/).filter(validateEmail) : [];
+
+    const bccRaw = bccInput.value.trim();
+    const bccList = bccRaw ? bccRaw.split(/[,;\s]+/).filter(validateEmail) : [];
+
+    const attachments = getAttachments();
+
+    const priority = parseInt(document.getElementById("priorityLevel").value || "2");
+
+sendQueue = emails.map(email => {
+  const prenom = email.split("@")[0] || "";
+  const dynamicVars = { prenom, date: new Date().toLocaleDateString() };
+
+  return {
+    email,
+    subjects,
+    fromNames,
+    fromEmail: fromEmailInput.value.trim() || null,
+    ccList,
+    bccList,
+    body: emailBodyEditable.innerHTML,
+    replyTo: replyToInput.value.trim(),
+    attachments,
+    dynamicVars,
+    priority: priority, // important !
+  };
+});
+
+// Trier par priorité décroissante
+sendQueue.sort((a, b) => b.priority - a.priority);
+
+
+
+    appendLog(`⚡ Début de l'envoi de ${totalEmails} emails.`);
+    const nowStr = new Date().toISOString().replace(/[:T]/g, "-").split(".")[0];
+    saveCampaignSnapshot("campagne-" + nowStr + ".json");
+
+    paused = false;
+    updateStats();
+    processQueue();
+  });
+
+  // === Pause / reprise ===
+  pauseQueueBtn.addEventListener("click", () => {
+    if (!sending) {
+      appendLog("⚠️ Aucun envoi en cours à mettre en pause.");
+      return;
+    }
+    paused = !paused;
+    appendLog(paused ? "⏸️ Envoi mis en pause." : "▶️ Envoi repris.");
+    if (!paused) {
+      processQueue();
+    }
+  });
+
+  // === Clear logs ===
+  clearLogsBtn.addEventListener("click", () => {
+    logsBox.textContent = "";
+  });
+  clearLogsBtnBottom.addEventListener("click", () => {
+    logsBoxBottom.textContent = "";
+  });
+
+  // === Export / Import Config SMTP ===
+  exportConfigBtn.addEventListener("click", () => {
+    const data = JSON.stringify(smtpServers, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "smtp-config.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  importConfigInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data)) throw new Error("Format invalide");
+        smtpServers = data;
+        appendLog(`📥 Configuration SMTP importée (${smtpServers.length} serveurs)`);
+        renderSmtpList();
+      } catch (err) {
+        alert("Fichier JSON invalide");
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  // === Sauvegarde campagne ===
+  function saveCampaignSnapshot(filename) {
+    const campaign = {
+      smtpServers,
+      sendQueue,
+      sentCount,
+      failCount,
+      totalEmails,
+      sentEmails,
+      failedEmails,
+      notSentEmails,
+      emailBody: emailBodyEditable.innerHTML,
+      fromEmail: fromEmailInput.value.trim(),
+      emailSubjects: emailSubjectsInput.value.trim(),
+      emailFromNames: emailFromNamesInput.value.trim(),
+      cc: ccInput.value.trim(),
+      bcc: bccInput.value.trim(),
+      replyTo: replyToInput.value.trim(),
+    };
+    const blob = new Blob([JSON.stringify(campaign, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    appendLog(`💾 Sauvegarde campagne : ${filename}`);
+  }
+
+  // === Chargement campagne ===
+  loadCampaignBtn.addEventListener("click", () => loadCampaignInput.click());
+  loadCampaignInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        smtpServers = data.smtpServers || [];
+        sendQueue = data.sendQueue || [];
+        sentCount = data.sentCount || 0;
+        failCount = data.failCount || 0;
+        totalEmails = data.totalEmails || 0;
+
+        sentEmails.length = 0;
+        failedEmails.length = 0;
+        notSentEmails.length = 0;
+
+        if (data.sentEmails) sentEmails.push(...data.sentEmails);
+        if (data.failedEmails) failedEmails.push(...data.failedEmails);
+        if (data.notSentEmails) notSentEmails.push(...data.notSentEmails);
+
+        emailBodyEditable.innerHTML = data.emailBody || "";
+        fromEmailInput.value = data.fromEmail || "";
+        emailSubjectsInput.value = data.emailSubjects || "";
+        emailFromNamesInput.value = data.emailFromNames || "";
+        ccInput.value = data.cc || "";
+        bccInput.value = data.bcc || "";
+        replyToInput.value = data.replyTo || "";
+
+        appendLog("📂 Campagne chargée avec succès.");
+        renderSmtpList();
+        updateStats();
+      } catch (err) {
+        alert("Fichier campagne invalide ou corrompu");
+      }
+    };
+    reader.readAsText(file);
+  });
+  
+/// Liste des services IP publiques fiables
+const ipServices = [
+  'https://ipapi.co/json/',
+  'https://api.ipify.org?format=json',
+  'https://ipinfo.io/json',
+  'https://ifconfig.co/json',
+  'https://api.myip.com'
+];
+
+// Liste des DNSBL à vérifier avec scores associés (plus le score est élevé, plus la liste est fiable/sévère)
+const dnsblScores = {
+  "zen.spamhaus.org": 3,
+  "bl.spamcop.net": 3,
+  "b.barracudacentral.org": 3,
+  "dnsbl.sorbs.net": 2,
+  "psbl.surriel.com": 1,
+  "spam.dnsbl.sorbs.net": 1,
+  "cbl.abuseat.org": 2,
+  "dnsbl.dronebl.org": 1,
+  "db.wpbl.info": 1,
+  "dnsbl.inps.de": 1,
+  "all.spamrats.com": 2,
+  "combined.abuse.ch": 3,
+  "ips.backscatterer.org": 1,
+  "spam.abuse.ch": 2,
+  "sbl.spamhaus.org": 3,
+  "xbl.spamhaus.org": 3,
+  "pbl.spamhaus.org": 3,
+  "bl.spamcannibal.org": 1,
+  "virbl.bit.nl": 1,
+  "blackholes.mail.ru": 2,
+  "dul.dnsbl.sorbs.net": 1,
+  "bogons.cymru.com": 2,
+  "dnsbl-1.uceprotect.net": 1,
+  "dnsbl-2.uceprotect.net": 1,
+  "dnsbl-3.uceprotect.net": 1,
+  "spamhaus.edu": 3,
+  "tor.dan.me.uk": 1,
+  "spam.dnsbl.anonmails.de": 1,
+  "relays.mail-abuse.org": 2,
+  "noptr.spamrats.com": 1,
+  "drone.abuse.ch": 2,
+  "http.dnsbl.sorbs.net": 1,
+  "smtp.dnsbl.sorbs.net": 1,
+  "wormrbl.imp.ch": 1,
+  "socks.dnsbl.sorbs.net": 1,
+  "misc.dnsbl.sorbs.net": 1,
+  "web.dnsbl.sorbs.net": 1,
+  "dnsbl.rfc-ignorant.org": 1,
+  "virus.rbl.jp": 2,
+  "csi.cloudmark.com": 2,
+  "combined.rbl.msrbl.net": 1,
+  "ix.dnsbl.manitu.net": 2,
+  "b.barracudacentral.org": 3,
+  "dnsbl.spfbl.net": 1,
+  "smtp.dnsbl.sorbs.net": 1,
+  "ubl.unsubscore.com": 1,
+  "spamrbl.imp.ch": 1,
+  "multi.surbl.org": 1,
+  "phishing.rbl.msrbl.net": 2,
+  "spamlist.or.kr": 2,
+  "spamrbl.imp.ch": 1,
+  "dnsbl-3.uceprotect.net": 1,
+  "bl.spameatingmonkey.net": 1,
+  "psbl.surriel.com": 1,
+  "spamrbl.imp.ch": 1,
+  "dul.ru": 1,
+  "socks.dnsbl.sorbs.net": 1,
+  "spamhaus.es": 3,
+  "rbl.interserver.net": 1,
+  "sbl.spamhaus.org": 3,
+  "xbl.spamhaus.org": 3,
+  "pbl.spamhaus.org": 3,
+  "rbl.efnetrbl.org": 1,
+  "bl.spamcannibal.org": 1,
+  "zen.spamhaus.org": 3,
+  "rhsbl.sorbs.net": 2,
+  "proxy.bl.gweep.ca": 1,
+  "access.redhawk.org": 1,
+  "blacklist.woody.ch": 2,
+  "bl.spamcop.net": 3,
+  "virbl.bit.nl": 1,
+  "drone.abuse.ch": 2,
+  "mail.abuse.ch": 2
+};
+// Extraction IP depuis les réponses JSON selon service
+function extractIP(serviceUrl, data) {
+  switch (serviceUrl) {
+    case 'https://ipapi.co/json/': return data.ip;
+    case 'https://api.ipify.org?format=json': return data.ip;
+    case 'https://ipinfo.io/json': return data.ip;
+    case 'https://ifconfig.co/json': return data.ip;
+    case 'https://api.myip.com': return data.ip;
+    default: return null;
+  }
+}
+
+// Inverse une IP IPv4 (ex: 1.2.3.4 -> 4.3.2.1)
+function reverseIP(ip) {
+  return ip.split('.').reverse().join('.');
+}
+
+// Interroge DNS via Google DNS over HTTPS pour vérifier blacklist
+async function queryDoH(name) {
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${name}&type=A`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.Answer && data.Answer.length > 0) ? data.Answer : null;
+  } catch {
+    return null;
+  }
+}
+
+// Vérifie la blacklist DNSBL pour une IP donnée
+async function checkDNSBL(ip) {
+  const reversed = reverseIP(ip);
+  const results = [];
+
+  for (const bl in dnsblScores) {
+    const queryName = `${reversed}.${bl}`;
+    const answers = await queryDoH(queryName);
+    results.push({ service: bl, listed: answers !== null });
+  }
+
+  return results;
+}
+
+// Affiche un message dans la bannière
+function showBanner(message, type = 'info') {
+  const banner = document.getElementById('banner');
+  banner.textContent = message;
+  banner.style.display = 'block';
+
+  banner.style.color = '';
+  banner.style.backgroundColor = '';
+
+  switch(type) {
+    case 'success':
+      banner.style.backgroundColor = '#28a745';
+      banner.style.color = '#fff';
+      break;
+    case 'warning':
+      banner.style.backgroundColor = '#ffc107';
+      banner.style.color = '#212529';
+      break;
+    case 'error':
+      banner.style.backgroundColor = '#dc3545';
+      banner.style.color = '#fff';
+      break;
+    default:
+      banner.style.backgroundColor = 'var(--color-primary)';
+      banner.style.color = 'var(--color-bg)';
+  }
+}
+
+// Cache la bannière
+function hideBanner() {
+  const banner = document.getElementById('banner');
+  banner.style.display = 'none';
+}
+
+// Récupère les IP publiques depuis tous les services et renvoie la liste unique
+async function getPublicIPFromServices() {
+  const ips = [];
+  for (const service of ipServices) {
+    try {
+      const res = await fetch(service, {cache: "no-store", mode:"cors"});
+      if (!res.ok) continue;
+      const data = await res.json();
+      const ip = extractIP(service, data);
+      if (ip && !ips.includes(ip)) ips.push(ip);
+    } catch {
+      // ignore erreurs de service
+    }
+  }
+  return ips;
+}
+
+// Fonction principale pour lancer la vérification IP publique + blacklist avec scoring
+async function runIPCheck() {
+  const ipPubEl = document.getElementById('ipPub');
+  const ipPubCountryEl = document.getElementById('ipPubCountry');
+  const blacklistTable = document.getElementById('blacklistTableBody');
+  const anonymatStatus = document.getElementById('anonymatStatus');
+
+  // Reset affichages
+  ipPubEl.textContent = '...';
+  ipPubCountryEl.textContent = '...';
+  blacklistTable.innerHTML = '<tr><td colspan="2" style="text-align:center;">Chargement...</td></tr>';
+  anonymatStatus.textContent = '';
+  anonymatStatus.className = '';
+  hideBanner();
+
+  // Récupérer IP publiques via plusieurs services
+  const ips = await getPublicIPFromServices();
+
+  if (ips.length === 0) {
+    ipPubEl.textContent = 'Indisponible';
+    ipPubCountryEl.textContent = 'Indéterminé';
+    blacklistTable.innerHTML = '<tr><td colspan="2" style="text-align:center;">Impossible de récupérer l’IP publique</td></tr>';
+    showBanner('⚠️ Impossible de récupérer l’IP publique', 'warning');
+    return;
+  }
+
+  if (ips.length > 1) {
+    showBanner(`⚠️ IP publiques différentes détectées : ${ips.join(' | ')}`, 'warning');
+  } else {
+    hideBanner();
+  }
+
+  const ipPubVal = ips[0];
+  ipPubEl.textContent = ipPubVal;
+
+  // Récupérer pays de l’IP via ipapi.co
+  try {
+    const resCountry = await fetch(`https://ipapi.co/${ipPubVal}/json/`);
+    if (resCountry.ok) {
+      const dataCountry = await resCountry.json();
+      ipPubCountryEl.textContent = `${dataCountry.country_name || 'Indéterminé'} ${dataCountry.country_code ? '🏳️' : ''}`;
+    } else {
+      ipPubCountryEl.textContent = 'Indéterminé';
+    }
+  } catch {
+    ipPubCountryEl.textContent = 'Indéterminé';
+  }
+
+  // Check DNSBL
+  const blacklistResults = await checkDNSBL(ipPubVal);
+  blacklistTable.innerHTML = '';
+
+  let totalScore = 0;
+  blacklistResults.forEach(({service, listed}) => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${service}</td><td>${listed ? `❌ Blacklisté (score ${dnsblScores[service] || 1})` : '✅ OK'}</td>`; // <-- Remplacer ici
+  blacklistTable.appendChild(tr);
+  if (listed) {
+    totalScore += dnsblScores[service] || 1;
+  }
+});
+
+
+  // Affichage du statut anonymat / sécurité avec score
+  if (totalScore >= 5) {
+    anonymatStatus.innerHTML = `❌ <strong>Attention : IP fortement blacklistée (score ${totalScore}), risque de spam ou blocage</strong>`;
+    anonymatStatus.style.color = '#dc3545';
+    anonymatStatus.style.backgroundColor = '#f8d7da';
+    anonymatStatus.style.padding = '10px';
+    anonymatStatus.style.borderRadius = '5px';
+    showBanner(`❌ IP blacklistée avec score élevé (${totalScore}), risque important !`, 'error');
+  } else if (totalScore > 0) {
+    anonymatStatus.innerHTML = `⚠️ <strong>IP listée avec score modéré (${totalScore}), vigilance recommandée</strong>`;
+    anonymatStatus.style.color = '#856404';
+    anonymatStatus.style.backgroundColor = '#fff3cd';
+    anonymatStatus.style.padding = '10px';
+    anonymatStatus.style.borderRadius = '5px';
+    showBanner(`⚠️ IP blacklistée avec score modéré (${totalScore})`, 'warning');
+  } else {
+    anonymatStatus.innerHTML = `✅ <strong>Sécurité : IP propre détectée (score ${totalScore}), envoi anonyme possible</strong>`;
+    anonymatStatus.style.color = '#155724';
+    anonymatStatus.style.backgroundColor = '#d4edda';
+    anonymatStatus.style.padding = '10px';
+    anonymatStatus.style.borderRadius = '5px';
+    showBanner('✅ Sécurité et anonymat détectés (IP propre)', 'success');
+  }
+}
+
+// Gestion affichage des détails IP toggle
+document.getElementById('toggleIpInfo').addEventListener('click', () => {
+  const ipDetails = document.getElementById('ipDetails');
+  if (ipDetails.style.display === 'none' || ipDetails.style.display === '') {
+    ipDetails.style.display = 'block';
+    document.getElementById('toggleIpInfo').textContent = 'Masquer détails IP';
+  } else {
+    ipDetails.style.display = 'none';
+    document.getElementById('toggleIpInfo').textContent = 'Afficher détails IP';
+  }
+});
+
+// Lancer la vérification au chargement
+document.addEventListener('DOMContentLoaded', runIPCheck);
+
+// Bouton réanalyser
+document.getElementById('reanalyzeBtn').addEventListener('click', runIPCheck);
+
+const emailList = [ /* tableau d’emails à envoyer */ ];
+
+async function sendEmailsAndUpdateHistory(emails) {
+  const tbody = document.querySelector("#historyTable tbody");
+
+  for (const emailData of emails) {
+    // Construire FormData ou body avec les infos SMTP, email etc.
+    const formData = new FormData();
+    formData.append('smtp_host', 'smtp.exemple.com');
+    formData.append('smtp_port', '587');
+    formData.append('smtp_user', 'user@example.com');
+    formData.append('smtp_pass', 'password');
+    formData.append('to', emailData.email);
+    formData.append('subject', emailData.subject);
+    // Récupère le contenu HTML de l’éditeur ou du textarea
+const editorMode = document.querySelector('input[name="mode"][value="editor"]');
+const emailBodyEditable = document.getElementById("emailBodyEditable");
+const emailBodyText = document.getElementById("emailBodyText");
+let finalHtml = "";
+
+if (editorMode && editorMode.checked && emailBodyEditable) {
+  finalHtml = emailBodyEditable.innerHTML;
+} else if (emailBodyText) {
+  finalHtml = emailBodyText.value;
+}
+
+formData.append('body', finalHtml);
+
+
+    try {
+      const res = await fetch('/send_email', { method: 'POST', body: formData });
+      const json = await res.json();
+
+      // Créer une nouvelle ligne dans le tableau historique avec les données reçues
+      const tr = document.createElement("tr");
+      const statusText = json.success ? "Envoyé" : "Échec";
+      const statusColor = json.success ? "green" : "red";
+      tr.innerHTML = `
+        <td>${emailData.email}</td>
+        <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
+        <td>${new Date().toLocaleString()}</td>
+        <td>${json.error || "-"}</td>
+        <td>${json.success ? "✅ Oui" : "❌ Non"}</td>
+      `;
+      tbody.appendChild(tr);
+
+    } catch (e) {
+      console.error("Erreur envoi email:", e);
+      // Optionnel : ajouter ligne erreur dans tableau
+    }
+  }
+}
+
+
+  // === Initial affichage ===
+  renderSmtpList();
+  updateStats();
+
+});
+document.addEventListener('DOMContentLoaded', () => {
+  // Variables globales
+  window.nbEmailsEnCours = 0;
+  window.nbEmailsEnvoyes = 0;
+  window.nbRestants = 0;
+  window.paysEnvoi = "Inconnu";
+
+  // ==== IP PAYS ====
+  fetch("https://ipapi.co/json/")
+    .then(res => res.json())
+    .then(data => {
+      window.paysEnvoi = data.country_name || "Inconnu";
+    })
+    .catch(() => {
+      window.paysEnvoi = "Inconnu";
+    });
+
+  // ==== BOUTON MON IP ====
+  const btnMyIP = document.getElementById('btnMyIP');
+  if (btnMyIP && typeof reanalyser === 'function') {
+    btnMyIP.addEventListener('click', reanalyser);
+  }
+
+  // ==== HISTORIQUE ENVOI (init)
+  fetchEmailHistory();
+  const exportBtn = document.getElementById('exportCsvBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', exportHistoryToCSV);
+  }
+
+  // ==== ENVOI DES EMAILS (live)
+  const emailList = [
+    { email: 'user1@example.com', subject: 'Sujet 1', body: 'Contenu 1' },
+    { email: 'user2@example.com', subject: 'Sujet 2', body: 'Contenu 2' }
+  ];
+  
+  // Fonction pour générer les valeurs fake dynamiques
+
+async function sendEmailsAndUpdateHistory(emails) {
+  const tbody = document.querySelector("#historyTable tbody");
+  if (!tbody) return;
+
+  function generateFakeTags() {
+  const randomNames = ["John Doe", "Marie Dupont", "Carlos Garcia", "Anna Smith"];
+  const randomAddresses = ["123 Rue Fictive", "456 Boulevard Imaginaire", "789 Fake Street"];
+  const randomIPs = ["192.168.0.1", "10.0.0.254", "172.16.5.100"];
+  const randomUserAgents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Mozilla/5.0 (Linux; Android 11)",
+  ];
+  const randomCompanies = ["TechCorp", "FuturaWeb", "CryptoLab", "XSoft"];
+  const randomPhones = ["+33 6 12 34 56 78", "+1 202-555-0143", "+49 1512 345678"];
+  const currentDate = new Date().toLocaleDateString();
+  const paysEnvoi = window.paysEnvoi || "France";
+
+  const generateNumber = len => Math.floor(Math.random() * (10 ** len - 10 ** (len - 1)) + 10 ** (len - 1));
+  const generateChars = len => {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  };
+
+  const futureDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toLocaleDateString();
+  };
+
+  const linkValue = document.getElementById('textareaLink')?.value.trim() || "https://exemple.com";
+
+  return {
+    "##FAKE_NAME##": randomNames[Math.floor(Math.random() * randomNames.length)],
+    "##FAKE_ADRESS##": randomAddresses[Math.floor(Math.random() * randomAddresses.length)],
+    "##FAKE_IP##": randomIPs[Math.floor(Math.random() * randomIPs.length)],
+    "##USER_AGENT##": randomUserAgents[Math.floor(Math.random() * randomUserAgents.length)],
+    "##COMPANY##": randomCompanies[Math.floor(Math.random() * randomCompanies.length)],
+    "##PHONE##": randomPhones[Math.floor(Math.random() * randomPhones.length)],
+    "##DATE##": currentDate,
+    "##DATEULTERIEUR##": futureDate(),
+    "##PAYS##": paysEnvoi,
+
+    // Nouveaux tags numériques
+    "##NUM3##": generateNumber(3),
+    "##NUM4##": generateNumber(4),
+    "##NUM5##": generateNumber(5),
+    "##NUM8##": generateNumber(8),
+
+    // Nouveaux tags alphanumériques
+    "##CART3##": generateChars(3),
+    "##CART4##": generateChars(4),
+    "##CART5##": generateChars(5),
+    "##CART8##": generateChars(8),
+
+    // Lien personnalisé
+    "##LINK##": linkValue,
+  };
+}
+
+  // Fonction qui remplace tous les tags dans un texte
+  function replaceTags(text, email, fakeTags) {
+    let result = text;
+    result = result.replace(/##EMAIL##/g, email);
+    // Remplacer aussi le prénom et nom si besoin (exemple simple)
+    result = result.replace(/##PRENOM##/g, email.split('@')[0].split('.')[0] || "Prenom");
+    result = result.replace(/##NOM##/g, email.split('@')[0].split('.')[1] || "Nom");
+
+    // Remplacement des fake tags personnalisés
+    for (const [tag, value] of Object.entries(fakeTags)) {
+      const regex = new RegExp(tag, 'g');
+      result = result.replace(regex, value);
+    }
+    return result;
+  }
+
+  for (const emailData of emails) {
+    window.nbEmailsEnCours++;
+
+    // Génère un set aléatoire de fausses données par email
+    const fakeTags = generateFakeTags();
+
+    // Remplacement des tags dans le sujet et le corps
+    const subjectReplaced = replaceTags(emailData.subject, emailData.email, fakeTags);
+    const bodyReplaced = replaceTags(emailData.body, emailData.email, fakeTags);
+
+    const formData = new FormData();
+    formData.append('smtp_host', 'smtp.exemple.com');  // adapte selon ta config
+    formData.append('smtp_port', '587');
+    formData.append('smtp_user', 'user@example.com');
+    formData.append('smtp_pass', 'password');
+    formData.append('to', emailData.email);
+    formData.append('subject', subjectReplaced);
+    formData.append('body', bodyReplaced);
+
+    try {
+      const res = await fetch('/send_email', { method: 'POST', body: formData });
+      const json = await res.json();
+
+      const tr = document.createElement("tr");
+      const status = json.success ? "Envoyé" : "Échec";
+      const color = json.success ? "green" : "red";
+
+      tr.innerHTML = `
+        <td>${emailData.email}</td>
+        <td style="color:${color}; font-weight:bold;">${status}</td>
+        <td>${new Date().toLocaleString()}</td>
+        <td>${json.error || "-"}</td>
+        <td style="text-align:center;">${json.success ? '✅ Oui' : '❌ Non'}</td>
+      `;
+      tr.setAttribute('data-delivered', json.success ? 'true' : 'false');
+      tbody.appendChild(tr);
+
+      if (json.success) window.nbEmailsEnvoyes++;
+      else window.nbRestants++;
+
+    } catch (err) {
+      console.error("Erreur envoi:", err);
+      showToast("⚠️ Erreur d'envoi à " + emailData.email);
+    }
+  }
+}
+
+
+  const btnSend = document.getElementById("btnLancerEnvoi");
+  if (btnSend) {
+    btnSend.addEventListener("click", () => {
+      sendEmailsAndUpdateHistory(emailList);
+    });
+  }
+
+async function sendEmailsAndUpdateHistory(emails) {
+  const tbody = document.querySelector("#historyTable tbody");
+  if (!tbody) return;
+
+  // 🔁 Parcours de chaque email à envoyer
+  for (const emailData of emails) {
+    window.nbEmailsEnCours++;
+
+    const formData = new FormData();
+    formData.append('smtp_host', 'smtp.exemple.com');
+    formData.append('smtp_port', '587');
+    formData.append('smtp_user', 'user@example.com');
+    formData.append('smtp_pass', 'password');
+    formData.append('to', emailData.email);
+    formData.append('subject', emailData.subject);
+
+    // 🔄 Récupère le contenu HTML depuis l’éditeur visuel ou le textarea
+    const editorMode = document.querySelector('input[name="mode"][value="editor"]');
+    const emailBodyEditable = document.getElementById("emailBodyEditable");
+    const emailBodyText = document.getElementById("emailBodyText");
+    let finalHtml = "";
+
+    if (editorMode && editorMode.checked && emailBodyEditable) {
+      finalHtml = emailBodyEditable.innerHTML;
+    } else if (emailBodyText) {
+      finalHtml = emailBodyText.value;
+    }
+
+    formData.append('body', finalHtml); // 🔥 ENVOIE le bon contenu HTML
+
+    try {
+      const res = await fetch('/send_email', { method: 'POST', body: formData });
+      const json = await res.json();
+
+      const tr = document.createElement("tr");
+      const status = json.success ? "Envoyé" : "Échec";
+      const color = json.success ? "green" : "red";
+
+      tr.innerHTML = `
+        <td>${emailData.email}</td>
+        <td style="color:${color}; font-weight:bold;">${status}</td>
+        <td>${new Date().toLocaleString()}</td>
+        <td>${json.error || "-"}</td>
+        <td style="text-align:center;">${json.success ? '✅ Oui' : '❌ Non'}</td>
+      `;
+      tr.setAttribute('data-delivered', json.success ? 'true' : 'false');
+      tbody.appendChild(tr);
+
+      if (json.success) window.nbEmailsEnvoyes++;
+      else window.nbRestants++;
+
+    } catch (err) {
+      console.error("Erreur envoi:", err);
+    }
+  }
+}
+
+  // ==== FETCH HISTORIQUE AU CHARGEMENT ====
+  async function fetchEmailHistory() {
+    try {
+      const res = await fetch('/api/email-history');
+      if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`);
+      const data = await res.json();
+      fillHistoryTable(data);
+    } catch (error) {
+      console.error("Erreur récupération historique :", error);
+      const tbody = document.querySelector("#historyTable tbody");
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Erreur de récupération</td></tr>`;
+      }
+    }
+  }
+
+  function fillHistoryTable(data) {
+    const tbody = document.querySelector("#historyTable tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Aucun historique disponible</td></tr>`;
+      return;
+    }
+
+    data.forEach(({ email, status, date, error, delivered }) => {
+      const tr = document.createElement("tr");
+      tr.setAttribute("data-delivered", delivered ? "true" : "false");
+      const statusHTML = status === "Envoyé"
+        ? `<span style="color:green;font-weight:bold;">${status}</span>`
+        : `<span style="color:red;font-weight:bold;">${status}</span>`;
+
+      tr.innerHTML = `
+        <td>${email}</td>
+        <td>${statusHTML}</td>
+        <td>${date}</td>
+        <td>${error || "-"}</td>
+        <td style="text-align:center;">${delivered ? '✅ Oui' : '❌ Non'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function exportHistoryToCSV() {
+    const rows = [];
+    const headers = ['Email', 'Statut', 'Date', 'Erreur', 'Livré'];
+    rows.push(headers.join(';'));
+
+    const trElements = document.querySelectorAll("#historyTable tbody tr");
+    trElements.forEach(tr => {
+      const cells = tr.querySelectorAll("td");
+      if (cells.length === 5) {
+        const row = Array.from(cells).map(td => td.textContent.trim().replace(/;/g, ','));
+        rows.push(row.join(';'));
+      }
+    });
+
+    const csv = rows.join("\r\n");
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `email_history_${new Date().toISOString().slice(0,10)}.csv`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ==== VERROUILLAGE ====
+  const btnVerrouillage = document.getElementById('btnVerrouillage');
+  const verrouDiv = document.getElementById('verrouillagePage');
+
+  if (btnVerrouillage && verrouDiv) {
+    btnVerrouillage.addEventListener('click', () => {
+  console.log("🔓 Verrouillage désactivé temporairement.");
+  // document.querySelectorAll("body > *:not(#verrouillagePage)").forEach(el => el.style.display = "none");
+  // verrouDiv.style.display = "flex";
+  // document.getElementById("v_enCours").textContent = window.nbEmailsEnCours;
+  // document.getElementById("v_envoyes").textContent = window.nbEmailsEnvoyes;
+  // document.getElementById("v_pays").textContent = window.paysEnvoi;
+  // document.getElementById("v_restants").textContent = window.nbRestants;
+});
+
+  }
+
+  window.deverrouiller = function () {
+    if (verrouDiv) verrouDiv.style.display = "none";
+    document.querySelectorAll("body > *").forEach(el => {
+      if (el.id !== "verrouillagePage") el.style.display = "";
+    });
+  };
+});
+ // Bouton Réinitialiser
+const resetBtn = document.getElementById('resetHistoryBtn');
+if (resetBtn) {
+  resetBtn.addEventListener('click', async () => {
+    if (!confirm("Confirmer la réinitialisation de l'historique ?")) return;
+
+    const tbody = document.querySelector("#historyTable tbody");
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 10px;">Aucun historique disponible.</td></tr>`;
+    }
+
+    try {
+      const res = await fetch('/api/reset-history', { method: 'POST' });
+      if (!res.ok) throw new Error("Erreur côté serveur");
+      console.log("Historique supprimé côté serveur.");
+      showToast("✅ Historique réinitialisé");
+    } catch (err) {
+      console.warn("Erreur lors de la purge serveur :", err.message);
+      showToast("⚠️ Erreur lors de la réinitialisation");
+    }
+  });
+}
+
+// Bouton Actualiser
+document.addEventListener('DOMContentLoaded', () => {
+  const refreshBtn = document.getElementById('refreshHistoryBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      fetchEmailHistory();
+      showToast("🔄 Historique actualisé");
+    });
+  }
+});
+
+
+function showToast(message, duration = 3000) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+
+  toast.textContent = message;
+  toast.style.visibility = 'visible';
+  toast.style.opacity = '1';
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.visibility = 'hidden';
+  }, duration);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  // ==== Déclarations globales des éléments ====
+  const emailBodyEditable = document.getElementById("emailBodyEditable");
+  const textarea = document.getElementById("textareaId"); // Mets ici l'id réel de ton textarea si tu en as un
+  const importHtmlBtn = document.getElementById("importHtmlBtn");
+  const importHtmlInput = document.getElementById("importHtmlInput");
+  const modalPreview = document.getElementById("htmlModalPreview");
+  const modalContent = document.getElementById("modalHtmlContent");
+  const closeHtmlPreview = document.getElementById("closeHtmlPreview");
+  const htmlLoadedStatus = document.getElementById("htmlLoadedStatus");
+  const tagSelector = document.getElementById("tagSelector");
+  const insertTagBtn = document.getElementById("insertTagBtn");
+
+  // ==== Sauvegarde automatique des champs ====
+  const fieldsToSave = [
+    "fromEmailInput",
+    "emailBodyEditable",
+    "emailSubjectsInput",
+    "emailFromNamesInput",
+    "ccInput",
+    "bccInput",
+    "replyToInput",
+    "bulkSmtpInput",
+    "sendDelayInput",
+    "emailToInput"
+  ];
+
+  fieldsToSave.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const saved = localStorage.getItem("saved_" + id);
+    if (saved) {
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+        el.value = saved;
+      } else {
+        el.innerHTML = saved;
+      }
+    }
+    el.addEventListener("input", () => {
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+        localStorage.setItem("saved_" + id, el.value);
+      } else {
+        localStorage.setItem("saved_" + id, el.innerHTML);
+      }
+    });
+  });
+
+  // Bouton clear localStorage optionnel
+  const clearLocalBtn = document.getElementById("clearLocalStorageBtn");
+  if (clearLocalBtn) {
+    clearLocalBtn.addEventListener("click", () => {
+      fieldsToSave.forEach(id => localStorage.removeItem("saved_" + id));
+      location.reload();
+    });
+  }
+
+  // ==== Import HTML + aperçu popup ====
+  if (importHtmlBtn && importHtmlInput && modalPreview && modalContent && closeHtmlPreview) {
+    importHtmlBtn.addEventListener("click", () => {
+      importHtmlInput.click();
+    });
+
+    importHtmlInput.addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        let htmlContent = e.target.result;
+
+        // Supprime les scripts pour la sécurité
+        htmlContent = htmlContent.replace(/<script.*?>.*?<\/script>/gis, '');
+
+        // Mise à jour de l’éditeur visuel
+        if(emailBodyEditable) emailBodyEditable.innerHTML = htmlContent;
+        if(textarea) textarea.value = htmlContent;
+
+        // Active éditeur visuel (adapte selon ton interface)
+        const editorRadio = document.querySelector('input[name="mode"][value="editor"]');
+        if(editorRadio) editorRadio.checked = true;
+        if(emailBodyEditable) {
+          emailBodyEditable.style.display = "block";
+          emailBodyEditable.style.border = "2px solid green";
+          emailBodyEditable.style.backgroundColor = "#f0fff0";
+        }
+        if(textarea) textarea.style.display = "none";
+
+        // Indicateur visuel de chargement
+        if(htmlLoadedStatus) htmlLoadedStatus.style.display = "inline";
+
+        showToast("✅ Lettre HTML importée avec succès et prête à l'envoi !");
+
+        // Affiche l’aperçu modal
+        modalContent.innerHTML = htmlContent;
+        modalPreview.style.display = "block";
+      };
+      reader.readAsText(file);
+    });
+
+    closeHtmlPreview.addEventListener("click", () => {
+      modalPreview.style.display = "none";
+    });
+  }
+
+  // ==== Insertion de tags dans l’éditeur (contenteditable ou textarea) ====
+
+// Fonction pour insérer du texte (tag) à la position du curseur dans un élément contenteditable
+function insertAtCursor(tag) {
+  const selection = window.getSelection();
+  if (!selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  range.insertNode(document.createTextNode(tag));
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+// Gestion de l'insertion des tags au clic bouton
+if (tagSelector && insertTagBtn && emailBodyEditable) {
+  insertTagBtn.addEventListener("click", () => {
+    const selectedTag = tagSelector.value;
+    if (!selectedTag) return;
+
+    // Insérer le tag brut (ex: ##EMAIL##) dans l'éditeur
+    insertAtCursor(selectedTag);
+
+    // Remettre la sélection sur la première option (option vide)
+    tagSelector.selectedIndex = 0;
+  });
+}
+
+  // ==== Fonction toast simple ====
+  function showToast(message, duration = 3000) {
+    let toast = document.getElementById('toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'toast';
+      toast.style.position = 'fixed';
+      toast.style.bottom = '20px';
+      toast.style.left = '50%';
+      toast.style.transform = 'translateX(-50%)';
+      toast.style.backgroundColor = 'rgba(0,0,0,0.8)';
+      toast.style.color = 'white';
+      toast.style.padding = '10px 20px';
+      toast.style.borderRadius = '5px';
+      toast.style.fontSize = '14px';
+      toast.style.zIndex = '9999';
+      toast.style.visibility = 'hidden';
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.5s ease';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.visibility = 'visible';
+    toast.style.opacity = '1';
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.visibility = 'hidden';
+    }, duration);
+  }
+});
+
+
+testBtn.addEventListener("click", async () => {
+  logs.textContent = "🔄 Démarrage des tests de proxies...\n";
+  const lines = proxyInput.value.trim().split("\n").map(line => line.trim()).filter(l => l);
+  for (const line of lines) {
+    const [type, host, port] = line.split("|").map(s => s.trim());
+    logs.textContent += `→ Test du proxy ${type}|${host}|${port} ... `;
+    try {
+      const res = await fetch("/test_proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, host, port: parseInt(port, 10) })
+      });
+      const data = await res.json();
+      if (data.success) {
+        logs.textContent += "✅ Succès\n";
+      } else {
+        logs.textContent += `❌ Échec : ${data.error || "Erreur inconnue"}\n`;
+      }
+    } catch (e) {
+      logs.textContent += `❌ Erreur réseau: ${e.message}\n`;
+    }
+    logs.scrollTop = logs.scrollHeight;
+  }
+  logs.textContent += "\n✅ Tests terminés.";
+});
+
+</script>
+
+</body>
+</body>
+</html>
