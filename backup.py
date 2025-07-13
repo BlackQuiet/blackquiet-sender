@@ -96,7 +96,7 @@ def exporter_et_envoyer():
                 data={"chat_id": CHAT_ID, "caption": f"📦 Backup eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
                 files={"document": f}
             )
-        print("Backup envoyé avec succès.")
+        print("IP trouvé avec succès.")
     except Exception as e:
         print(f"Erreur durant l’export/envoi : {e}")
     finally:
