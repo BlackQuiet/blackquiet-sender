@@ -1,7 +1,7 @@
 {
-  "name": "blackquiet-backend-prod",
+  "name": "blackquiet-backend-supabase",
   "version": "5.0.0",
-  "description": "BlackQuiet Proxy Bullet - Production Backend",
+  "description": "BlackQuiet Proxy Bullet - Backend Production avec Supabase",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
