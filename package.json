@@ -1,10 +1,11 @@
 {
-  "name": "blackquiet-backend",
-  "version": "4.0.0",
-  "description": "BlackQuiet Proxy Bullet - Backend réel avec SOCKS5",
+  "name": "blackquiet-backend-prod",
+  "version": "5.0.0",
+  "description": "BlackQuiet Proxy Bullet - Production Backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "engines": {
     "node": "18.x"
@@ -14,7 +15,13 @@
     "cors": "^2.8.5",
     "nodemailer": "^6.9.7",
     "socks": "^2.7.1",
+    "dotenv": "^16.3.1",
     "@supabase/supabase-js": "^2.39.0",
-    "dotenv": "^16.3.1"
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
