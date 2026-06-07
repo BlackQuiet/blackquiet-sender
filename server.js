@@ -1,24 +1,24 @@
-// server.js - BACKEND NODE.JS POUR RENDER
-require('dotenv').config();
+// server.js - COPIE/COLLE CE CODE COMPLET
 const express = require('express');
 const cors = require('cors');
-const { SocksClient } = require('socks');
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const Queue = require('bull');
+
+// Tentative d'import des dépendances optionnelles
+let SocksClient, nodemailer;
+try {
+    const socksModule = require('socks');
+    SocksClient = socksModule.SocksClient;
+    nodemailer = require('nodemailer');
+    console.log('✅ SOCKS5 et Nodemailer chargés');
+} catch (error) {
+    console.log('⚠️ SOCKS5 non disponible, mode simulation activé');
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // Pour servir le frontend si inclus
 
 // ============ CONFIGURATION ============
-const PORT = process.env.PORT || 3000;
-
-// Configuration 9Proxy (depuis les variables d'environnement Render)
 const PROXY_CONFIG = {
     proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
     proxy_port: process.env.PROXY_PORT || 17521,
@@ -28,48 +28,42 @@ const PROXY_CONFIG = {
     smtp_port: process.env.SMTP_PORT || 25
 };
 
-// Compteur d'endpoints (statistiques)
-let endpointCount = parseInt(process.env.ENDPOINT_COUNT) || 0;
+let endpointCount = 0;
+let emailSentCount = 0;
+let emailFailedCount = 0;
 
-// ============ FONCTION DE ROTATION SSID ============
+// ============ ROTATION SSID ============
 function rotateProxySSID(username) {
-    if (!username) return username;
     const newSsid = crypto.randomBytes(5).toString('hex').toUpperCase();
     endpointCount++;
-    let result;
     if (username.includes('-ssid-')) {
-        result = username.replace(/-ssid-[a-zA-Z0-9]+/, `-ssid-${newSsid}`);
-    } else {
-        result = `${username}-ssid-${newSsid}`;
+        return username.replace(/-ssid-[a-zA-Z0-9]+/, `-ssid-${newSsid}`);
     }
-    return result;
+    return `${username}-ssid-${newSsid}`;
 }
 
-// ============ FONCTION DE REMPLACEMENT DES PLACEHOLDERS ============
-function replacePlaceholders(text, recipientEmail, link = null) {
+// ============ REMPLACEMENT PLACEHOLDERS ============
+function replacePlaceholders(text, recipientEmail, link) {
+    if (!text) return '';
     let result = text;
-    const domain = recipientEmail.split('@')[1] || 'example.ca';
     const username = recipientEmail.split('@')[0] || 'client';
     const firstName = username.charAt(0).toUpperCase() + username.slice(1);
     const invoiceNum = 'INV-' + Math.floor(100000 + Math.random() * 900000);
-    const amount = '$' + (Math.random() * 5000).toFixed(2);
     
     const replacements = {
-        '[EMAIL]': recipientEmail,
-        '[DOMAIN]': domain,
-        '[UNAME]': username,
         '[FIRST_NAME]': firstName,
         '[REAL_NAME]': firstName + ' ' + ['Smith', 'Johnson', 'Williams'][Math.floor(Math.random() * 3)],
+        '[INVOICE_NUM]': invoiceNum,
+        '[BALANCE_AMOUNT]': '$' + (Math.random() * 5000).toFixed(2),
         '[DATE]': new Date().toLocaleDateString(),
         '[TIME]': new Date().toLocaleTimeString(),
-        '[INVOICE_NUM]': invoiceNum,
-        '[BALANCE_AMOUNT]': amount,
-        '[DEADLINE_DATE]': new Date(Date.now() + 7 * 86400000).toLocaleDateString(),
-        '[PATIENT_ID]': 'PT-' + Math.floor(100000 + Math.random() * 900000),
-        '[TRACKING_NUM]': '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
-        '[VERIFICATION_CODE]': Math.floor(100000 + Math.random() * 900000).toString(),
         '[RAND1]': Math.floor(10000 + Math.random() * 90000).toString(),
         '[RAND2]': Math.floor(10000000 + Math.random() * 90000000).toString(),
+        '[PATIENT_ID]': 'PT-' + Math.floor(100000 + Math.random() * 900000),
+        '[MEDICAL_RECORD]': 'MRN-' + Math.floor(1000000 + Math.random() * 9000000),
+        '[DOCTOR_NAME]': 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
+        '[TRACKING_NUM]': '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
+        '[VERIFICATION_CODE]': Math.floor(100000 + Math.random() * 900000).toString(),
         '[IP_ADDRESS]': '192.168.' + Math.floor(1 + Math.random() * 254) + '.' + Math.floor(1 + Math.random() * 254)
     };
     
@@ -79,21 +73,29 @@ function replacePlaceholders(text, recipientEmail, link = null) {
     
     if (result.includes('[LINK]') && link) {
         result = result.replace('[LINK]', link);
+    } else if (result.includes('[LINK]')) {
+        result = result.replace('[LINK]', 'https://tinyurl.com/' + Math.random().toString(36).substring(2, 8));
     }
     
     return result;
 }
 
-// ============ ENVOI VIA TUNNEL SOCKS5 ============
+// ============ ENVOI VIA SOCKS5 ============
 async function sendWithProxyTunnel(proxyConfig, mailOptions) {
+    // Si les dépendances ne sont pas disponibles, mode simulation
+    if (!SocksClient || !nodemailer) {
+        console.log('[SIMULATION] Mode démo - aucun email réel envoyé');
+        emailSentCount++;
+        return { success: true, messageId: 'demo-' + Date.now(), simulated: true };
+    }
+    
     let socket = null;
     try {
         const rotatedUser = rotateProxySSID(proxyConfig.proxy_user_template);
         
-        console.log(`[PROXY] Tunnel SOCKS5 vers ${proxyConfig.proxy_host}:${proxyConfig.proxy_port}`);
+        console.log(`[PROXY] Tunnel vers ${proxyConfig.proxy_host}:${proxyConfig.proxy_port}`);
         console.log(`[PROXY] Username: ${rotatedUser.substring(0, 50)}...`);
         
-        // Création du tunnel SOCKS5
         const tunnel = await SocksClient.createConnection({
             proxy: {
                 ipaddress: proxyConfig.proxy_host,
@@ -111,7 +113,6 @@ async function sendWithProxyTunnel(proxyConfig, mailOptions) {
         
         socket = tunnel.socket;
         
-        // Création du transporteur Nodemailer
         const transporter = nodemailer.createTransport({
             host: proxyConfig.smtp_host,
             port: parseInt(proxyConfig.smtp_port),
@@ -122,14 +123,15 @@ async function sendWithProxyTunnel(proxyConfig, mailOptions) {
             timeout: 30000
         });
         
-        // Envoi de l'email
         const result = await transporter.sendMail(mailOptions);
         transporter.close();
+        emailSentCount++;
         
         console.log(`[SUCCESS] Email envoyé à ${mailOptions.to}`);
         return { success: true, messageId: result.messageId };
         
     } catch (error) {
+        emailFailedCount++;
         console.error(`[ERROR] ${error.message}`);
         return { success: false, error: error.message };
     } finally {
@@ -137,147 +139,137 @@ async function sendWithProxyTunnel(proxyConfig, mailOptions) {
     }
 }
 
-// ============ GÉNÉRATION DE PDF AVEC PUPPETEER ============
-async function generatePDFFromHTML(htmlContent) {
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ 
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    await page.setContent(htmlContent);
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-    return pdf;
-}
-
-// ============ API ENDPOINTS ============
+// ============ ROUTES API ============
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), endpoints: endpointCount });
+    res.json({ 
+        status: 'OK', 
+        service: 'BlackQuiet Sender',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0'
+    });
 });
 
-// Envoi d'un seul email
+// Route d'envoi d'email (IMPORTANTE - CELLE QUI TE MANQUE)
 app.post('/api/send', async (req, res) => {
     const { to, subject, html, fromEmail, fromName, link } = req.body;
     
+    console.log(`[API] Requête reçue pour: ${to}`);
+    
+    // Vérification des champs requis
     if (!to || !subject || !html) {
-        return res.status(400).json({ success: false, error: 'Missing required fields' });
+        return res.status(400).json({ 
+            success: false, 
+            error: 'Champs manquants: to, subject, html sont requis' 
+        });
     }
     
-    const processedHtml = replacePlaceholders(html, to, link);
-    const processedSubject = replacePlaceholders(subject, to, link);
-    
-    const mailOptions = {
-        from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
-        to: to,
-        subject: processedSubject,
-        html: processedHtml,
-        headers: {
-            'X-Priority': '3',
-            'X-Mailer': 'Microsoft Outlook 16.0',
-            'X-MS-Exchange-Organization-AuthAs': 'Internal'
-        }
-    };
-    
-    const result = await sendWithProxyTunnel(PROXY_CONFIG, mailOptions);
-    res.json(result);
+    try {
+        const processedHtml = replacePlaceholders(html, to, link);
+        const processedSubject = replacePlaceholders(subject, to, link);
+        
+        const mailOptions = {
+            from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
+            to: to,
+            subject: processedSubject,
+            html: processedHtml,
+            headers: {
+                'X-Priority': '3',
+                'X-Mailer': 'Microsoft Outlook 16.0',
+                'X-MS-Exchange-Organization-AuthAs': 'Internal'
+            }
+        };
+        
+        const result = await sendWithProxyTunnel(PROXY_CONFIG, mailOptions);
+        res.json(result);
+        
+    } catch (error) {
+        console.error(`[API ERROR] ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
-// Envoi en masse (avec file d'attente)
-const emailQueue = new Queue('email sending', process.env.REDIS_URL || 'redis://localhost:6379');
-
-emailQueue.process(async (job) => {
-    const { to, subject, html, fromEmail, fromName, link } = job.data;
-    const processedHtml = replacePlaceholders(html, to, link);
-    const mailOptions = {
-        from: `"${fromName}" <${fromEmail}>`,
-        to: to,
-        subject: replacePlaceholders(subject, to, link),
-        html: processedHtml
-    };
-    return await sendWithProxyTunnel(PROXY_CONFIG, mailOptions);
-});
-
-app.post('/api/bulk-send', async (req, res) => {
+// Route d'envoi multiple (batch)
+app.post('/api/batch-send', async (req, res) => {
     const { recipients, subject, html, fromEmail, fromName, link } = req.body;
     
-    if (!recipients || !Array.isArray(recipients)) {
-        return res.status(400).json({ success: false, error: 'Invalid recipients array' });
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+        return res.status(400).json({ success: false, error: 'Liste de destinataires invalide' });
     }
-    
-    const jobs = recipients.map(recipient => {
-        return emailQueue.add({
-            to: recipient,
-            subject,
-            html,
-            fromEmail,
-            fromName,
-            link
-        });
-    });
-    
-    res.json({ success: true, queued: jobs.length, message: 'Emails queued for sending' });
-});
-
-// Vérification DNS (GhostHackerDNS)
-app.post('/api/dns-check', async (req, res) => {
-    const { domain } = req.body;
-    if (!domain) return res.status(400).json({ error: 'Domain required' });
     
     const results = [];
-    
-    // Niveau 1: DNS Direct
-    try {
-        const response = await axios.get(`https://dns.google/resolve?name=${domain}&type=MX`);
-        if (response.data?.Answer?.length) {
-            const mx = response.data.Answer.filter(a => a.type === 15).map(a => a.data);
-            if (mx.length) {
-                results.push({ method: 'Direct', mx: mx[0], success: true });
-            }
-        }
-    } catch (e) {}
-    
-    // Niveau 2: DoH
-    if (results.length === 0) {
-        try {
-            const response = await axios.get(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
-                headers: { Accept: 'application/dns-json' }
-            });
-            if (response.data?.Answer?.length) {
-                const mx = response.data.Answer.filter(a => a.type === 15).map(a => a.data);
-                if (mx.length) {
-                    results.push({ method: 'DoH', mx: mx[0], success: true });
-                }
-            }
-        } catch (e) {}
+    for (const recipient of recipients) {
+        const processedHtml = replacePlaceholders(html, recipient, link);
+        const processedSubject = replacePlaceholders(subject, recipient, link);
+        
+        const mailOptions = {
+            from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
+            to: recipient,
+            subject: processedSubject,
+            html: processedHtml
+        };
+        
+        const result = await sendWithProxyTunnel(PROXY_CONFIG, mailOptions);
+        results.push({ recipient, ...result });
+        
+        // Pause entre les envois pour éviter la détection
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // Niveau 3: Proxy (simulé si les deux précédents échouent)
-    if (results.length === 0) {
-        results.push({ method: 'Proxy', success: false, error: 'No MX records found' });
-    }
-    
-    res.json({ domain, results, valid: results.some(r => r.success) });
+    res.json({ success: true, results });
 });
 
 // Statistiques
 app.get('/api/stats', (req, res) => {
     res.json({
         endpoints_generated: endpointCount,
+        emails_sent: emailSentCount,
+        emails_failed: emailFailedCount,
         proxy_config: {
             host: PROXY_CONFIG.proxy_host,
             port: PROXY_CONFIG.proxy_port,
             smtp: `${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`
         },
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
+    });
+});
+
+// Route pour vérifier la configuration
+app.get('/api/config', (req, res) => {
+    res.json({
+        proxy_host: PROXY_CONFIG.proxy_host,
+        proxy_port: PROXY_CONFIG.proxy_port,
+        smtp_host: PROXY_CONFIG.smtp_host,
+        smtp_port: PROXY_CONFIG.smtp_port,
+        mode: SocksClient ? 'real' : 'simulation'
+    });
+});
+
+// Route par défaut
+app.get('/', (req, res) => {
+    res.json({
+        message: 'BlackQuiet Proxy Bullet API',
+        endpoints: {
+            health: 'GET /api/health',
+            send: 'POST /api/send',
+            batch: 'POST /api/batch-send',
+            stats: 'GET /api/stats',
+            config: 'GET /api/config'
+        }
     });
 });
 
 // ============ DÉMARRAGE ============
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`[SERVER] BLACKQUIET BACKEND running on port ${PORT}`);
-    console.log(`[PROXY] Config: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
-    console.log(`[SMTP] Target: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
+    console.log(`\n========================================`);
+    console.log(`🚀 BLACKQUIET BACKEND`);
+    console.log(`========================================`);
+    console.log(`📡 Port: ${PORT}`);
+    console.log(`🔌 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+    console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
+    console.log(`🔄 Mode: ${SocksClient ? 'REEL (SOCKS5)' : 'SIMULATION'}`);
+    console.log(`========================================\n`);
 });
