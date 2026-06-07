@@ -1,12 +1,15 @@
 // ============================================
-// BLACKQUIET PROXY BULLET - BACKEND COMPLET
-// AVEC GESTION DE LICENCE VIA SUPABASE
+// BLACKQUIET PROXY BULLET - BACKEND RÉEL
+// AVEC TUNNEL SOCKS5 VERS 9PROXY
+// GESTION DE LICENCE VIA SUPABASE
 // ============================================
 
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const { SocksClient } = require('socks');
+const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
 
 // ============ INITIALISATION ============
@@ -20,14 +23,14 @@ const supabase = createClient(
     process.env.SUPABASE_ANON_KEY
 );
 
-// ============ CONFIGURATION PROXY 9Proxy ============
+// ============ CONFIGURATION 9PROXY ============
 const PROXY_CONFIG = {
     proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
-    proxy_port: process.env.PROXY_PORT || 17521,
+    proxy_port: parseInt(process.env.PROXY_PORT) || 17521,
     proxy_user_template: process.env.PROXY_USER || 'black_rIxx-country-CA-isp-as11260_eastlink',
     proxy_pass: process.env.PROXY_PASS || 'Kouame07',
     smtp_host: process.env.SMTP_HOST || 'smtp.eastlink.ca',
-    smtp_port: process.env.SMTP_PORT || 25
+    smtp_port: parseInt(process.env.SMTP_PORT) || 25
 };
 
 // ============ VARIABLES STATISTIQUES ============
@@ -37,15 +40,8 @@ let emailFailedCount = 0;
 
 // ============ FONCTIONS DE LICENCE ============
 
-// Générer un Hardware ID (simulé côté serveur pour la démo)
-function generateHardwareId() {
-    return 'HWID-' + crypto.randomBytes(16).toString('hex').toUpperCase();
-}
-
-// Vérifier une licence dans Supabase
 async function verifyLicense(licenseKey, hwid, req) {
     try {
-        // 1. Vérifier si la licence existe et est active
         const { data: license, error } = await supabase
             .from('licenses')
             .select('*')
@@ -58,7 +54,6 @@ async function verifyLicense(licenseKey, hwid, req) {
             return { valid: false, error: 'Clé de licence invalide' };
         }
         
-        // 2. Vérifier l'expiration
         const expiresAt = new Date(license.expires_at);
         const now = new Date();
         
@@ -67,13 +62,11 @@ async function verifyLicense(licenseKey, hwid, req) {
             return { valid: false, error: 'Licence expirée', expires_at: license.expires_at };
         }
         
-        // 3. Vérifier le HWID si déjà lié
         if (license.hwid && license.hwid !== hwid) {
             await logLicenseAttempt(licenseKey, hwid, 'HWID_MISMATCH', req);
             return { valid: false, error: 'Cette licence est liée à un autre appareil' };
         }
         
-        // 4. Lier le HWID si ce n'est pas déjà fait
         if (!license.hwid && hwid && hwid !== 'unknown') {
             await supabase
                 .from('licenses')
@@ -90,14 +83,12 @@ async function verifyLicense(licenseKey, hwid, req) {
                 .eq('license_key', licenseKey);
         }
         
-        // 5. Log de succès
         await logLicenseAttempt(licenseKey, hwid, 'SUCCESS', req);
         
         return { 
             valid: true, 
             system_name: license.system_name || 'Blackquiet User',
-            expires_at: license.expires_at,
-            message: 'Licence valide'
+            expires_at: license.expires_at
         };
         
     } catch (error) {
@@ -106,7 +97,6 @@ async function verifyLicense(licenseKey, hwid, req) {
     }
 }
 
-// Logger les tentatives de licence
 async function logLicenseAttempt(licenseKey, hwid, status, req) {
     try {
         await supabase.from('license_logs').insert({
@@ -121,27 +111,6 @@ async function logLicenseAttempt(licenseKey, hwid, status, req) {
     }
 }
 
-// Créer une nouvelle licence (admin)
-async function createLicense(licenseKey, expiresInDays = 365, systemName = null) {
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + expiresInDays);
-    
-    const { data, error } = await supabase
-        .from('licenses')
-        .insert({
-            license_key: licenseKey,
-            expires_at: expiresAt.toISOString(),
-            system_name: systemName,
-            is_active: true
-        })
-        .select()
-        .single();
-    
-    if (error) throw error;
-    return data;
-}
-
-// ============ MIDDLEWARE DE VÉRIFICATION DE LICENCE ============
 async function requireLicense(req, res, next) {
     const licenseKey = req.headers['x-license-key'];
     const hwid = req.headers['x-hwid'];
@@ -160,8 +129,7 @@ async function requireLicense(req, res, next) {
         return res.status(403).json({ 
             success: false, 
             error: result.error,
-            code: result.error === 'Licence expirée' ? 'LICENSE_EXPIRED' : 'INVALID_LICENSE',
-            expires_at: result.expires_at
+            code: result.error === 'Licence expirée' ? 'LICENSE_EXPIRED' : 'INVALID_LICENSE'
         });
     }
     
@@ -169,9 +137,7 @@ async function requireLicense(req, res, next) {
     next();
 }
 
-// ============ FONCTIONS UTILITAIRES ============
-
-// Rotation SSID (identique au code original)
+// ============ ROTATION SSID (CODE ORIGINAL) ============
 function rotateProxySSID(username) {
     const newSsid = crypto.randomBytes(5).toString('hex').toUpperCase();
     endpointCount++;
@@ -181,7 +147,7 @@ function rotateProxySSID(username) {
     return `${username}-ssid-${newSsid}`;
 }
 
-// Remplacement des placeholders (comme dans l'original)
+// ============ REMPLACEMENT DES PLACEHOLDERS ============
 function replacePlaceholders(text, recipientEmail, link) {
     if (!text) return '';
     let result = text;
@@ -203,7 +169,10 @@ function replacePlaceholders(text, recipientEmail, link) {
         '[DOCTOR_NAME]': 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
         '[TRACKING_NUM]': '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         '[VERIFICATION_CODE]': Math.floor(100000 + Math.random() * 900000).toString(),
-        '[IP_ADDRESS]': '192.168.' + Math.floor(1 + Math.random() * 254) + '.' + Math.floor(1 + Math.random() * 254)
+        '[IP_ADDRESS]': '192.168.' + Math.floor(1 + Math.random() * 254) + '.' + Math.floor(1 + Math.random() * 254),
+        '[EMAIL]': recipientEmail,
+        '[DOMAIN]': recipientEmail.split('@')[1] || 'example.ca',
+        '[UNAME]': username
     };
     
     for (const [key, value] of Object.entries(replacements)) {
@@ -212,98 +181,121 @@ function replacePlaceholders(text, recipientEmail, link) {
     
     if (result.includes('[LINK]') && link) {
         result = result.replace('[LINK]', link);
-    } else if (result.includes('[LINK]')) {
-        result = result.replace('[LINK]', 'https://tinyurl.com/' + Math.random().toString(36).substring(2, 8));
     }
     
     return result;
 }
 
-// ============ ENVOI D'EMAIL ============
-async function sendEmailWithProxy(mailOptions) {
-    // Tentative d'import des modules (s'ils sont installés)
-    let SocksClient, nodemailer;
-    try {
-        SocksClient = require('socks').SocksClient;
-        nodemailer = require('nodemailer');
-    } catch (error) {
-        console.log('[SIMULATION] Modules SOCKS non disponibles');
-        emailSentCount++;
-        return { success: true, messageId: 'sim-' + Date.now(), simulated: true };
-    }
+// ============ ENVOI D'EMAIL VIA TUNNEL SOCKS5 RÉEL ============
+async function sendEmailViaProxy(mailOptions) {
+    let socket = null;
     
     try {
         const rotatedUser = rotateProxySSID(PROXY_CONFIG.proxy_user_template);
         
-        console.log(`[PROXY] Tunnel vers ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+        console.log(`[PROXY] Tunnel SOCKS5 vers ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+        console.log(`[PROXY] Username: ${rotatedUser.substring(0, 60)}...`);
+        console.log(`[PROXY] Destination: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
         
+        // Création du tunnel SOCKS5
         const tunnel = await SocksClient.createConnection({
             proxy: {
                 ipaddress: PROXY_CONFIG.proxy_host,
-                port: parseInt(PROXY_CONFIG.proxy_port),
+                port: PROXY_CONFIG.proxy_port,
                 type: 5,
                 userId: rotatedUser,
                 password: PROXY_CONFIG.proxy_pass
             },
             destination: {
                 host: PROXY_CONFIG.smtp_host,
-                port: parseInt(PROXY_CONFIG.smtp_port)
+                port: PROXY_CONFIG.smtp_port
             },
-            command: 'connect'
-        });
-        
-        const transporter = nodemailer.createTransport({
-            host: PROXY_CONFIG.smtp_host,
-            port: parseInt(PROXY_CONFIG.smtp_port),
-            secure: PROXY_CONFIG.smtp_port === 465,
-            ignoreTLS: PROXY_CONFIG.smtp_port === 25,
-            connection: tunnel.socket,
-            tls: { rejectUnauthorized: false },
+            command: 'connect',
             timeout: 30000
         });
         
+        socket = tunnel.socket;
+        
+        // Création du transporteur Nodemailer via le tunnel
+        const transporter = nodemailer.createTransport({
+            host: PROXY_CONFIG.smtp_host,
+            port: PROXY_CONFIG.smtp_port,
+            secure: PROXY_CONFIG.smtp_port === 465,
+            ignoreTLS: PROXY_CONFIG.smtp_port === 25,
+            connection: socket,
+            tls: { rejectUnauthorized: false },
+            timeout: 30000,
+            socketTimeout: 30000
+        });
+        
+        // Envoi de l'email
         const result = await transporter.sendMail(mailOptions);
         transporter.close();
-        tunnel.socket.end();
         
         emailSentCount++;
         console.log(`[SUCCÈS] Email envoyé à ${mailOptions.to}`);
+        console.log(`[SUCCÈS] Message ID: ${result.messageId}`);
+        
         return { success: true, messageId: result.messageId };
         
     } catch (error) {
         emailFailedCount++;
         console.error(`[ERREUR] ${error.message}`);
         return { success: false, error: error.message };
+    } finally {
+        if (socket && !socket.destroyed) {
+            socket.end();
+        }
     }
+}
+
+// ============ GÉNÉRATION DES HEADERS STEALTH ============
+function generateStealthHeaders(fromEmail, toEmail, proxyHost, subject) {
+    const headers = {
+        'Date': new Date().toUTCString(),
+        'MIME-Version': '1.0',
+        'Content-Language': 'en-US',
+        'X-Priority': '3',
+        'X-Mailer': 'Microsoft Outlook 16.0',
+        'X-MimeOLE': 'Produced By Microsoft MimeOLE V16.0.0.0',
+        'X-MS-Exchange-Organization-AuthAs': 'Internal',
+        'X-MS-Exchange-Organization-AuthMechanism': '04',
+        'Thread-Topic': subject,
+        'X-Auto-Response-Suppress': 'All'
+    };
+    
+    if (proxyHost) {
+        headers['X-Originating-IP'] = `[${proxyHost}]`;
+    }
+    
+    return headers;
 }
 
 // ============ ROUTES PUBLIQUES ============
 
-// Health check
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         service: 'BlackQuiet Sender',
         timestamp: new Date().toISOString(),
-        version: '2.0.0',
-        license_required: true
+        version: '3.0.0',
+        license_required: true,
+        mode: 'REAL'
     });
 });
 
-// Configuration
 app.get('/api/config', (req, res) => {
     res.json({
         proxy_host: PROXY_CONFIG.proxy_host,
         proxy_port: PROXY_CONFIG.proxy_port,
         smtp_host: PROXY_CONFIG.smtp_host,
         smtp_port: PROXY_CONFIG.smtp_port,
-        mode: 'ready',
+        mode: 'REAL',
         license_required: true,
-        version: '2.0.0'
+        version: '3.0.0'
     });
 });
 
-// Vérifier une licence (sans authentification)
 app.post('/api/license/verify', async (req, res) => {
     const { license_key, hwid } = req.body;
     
@@ -315,36 +307,28 @@ app.post('/api/license/verify', async (req, res) => {
     res.json(result);
 });
 
-// Obtenir un HWID de démonstration
-app.get('/api/license/demo-hwid', (req, res) => {
-    res.json({ 
-        hwid: generateHardwareId(),
-        note: "Ce HWID est généré côté serveur. En production, le client doit envoyer son vrai HWID."
-    });
-});
-
-// Route racine
 app.get('/', (req, res) => {
     res.json({
-        message: 'BlackQuiet Proxy Bullet API',
-        version: '2.0.0',
+        message: 'BlackQuiet Proxy Bullet API - MODE RÉEL',
+        version: '3.0.0',
         license_required: true,
+        mode: 'REAL - Tunnel SOCKS5 actif',
         endpoints: {
             'GET /': 'Liste des endpoints',
             'GET /api/health': 'Health check',
             'GET /api/config': 'Configuration',
             'POST /api/license/verify': 'Vérifier une licence',
-            'GET /api/license/demo-hwid': 'Obtenir un HWID de démonstration',
             'POST /api/send': 'Envoyer un email (licence requise)',
             'POST /api/batch-send': 'Envoi multiple (licence requise)',
-            'GET /api/stats': 'Statistiques (licence requise)'
+            'GET /api/stats': 'Statistiques (licence requise)',
+            'POST /api/admin/license/create': 'Créer une licence (admin)',
+            'GET /api/admin/licenses': 'Lister les licences (admin)'
         }
     });
 });
 
-// ============ ROUTES PROTÉGÉES PAR LICENCE ============
+// ============ ROUTES PROTÉGÉES ============
 
-// Envoyer un email
 app.post('/api/send', requireLicense, async (req, res) => {
     const { to, subject, html, fromEmail, fromName, link } = req.body;
     
@@ -352,26 +336,29 @@ app.post('/api/send', requireLicense, async (req, res) => {
         return res.status(400).json({ success: false, error: 'Champs requis: to, subject, html' });
     }
     
-    const processedHtml = replacePlaceholders(html, to, link);
-    const processedSubject = replacePlaceholders(subject, to, link);
-    
-    const mailOptions = {
-        from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
-        to: to,
-        subject: processedSubject,
-        html: processedHtml,
-        headers: {
-            'X-Priority': '3',
-            'X-Mailer': 'Microsoft Outlook 16.0',
-            'X-MS-Exchange-Organization-AuthAs': 'Internal'
-        }
-    };
-    
-    const result = await sendEmailWithProxy(mailOptions);
-    res.json(result);
+    try {
+        const processedHtml = replacePlaceholders(html, to, link);
+        const processedSubject = replacePlaceholders(subject, to, link);
+        const finalFromEmail = fromEmail || 'noreply@eastlink.ca';
+        const finalFromName = fromName || 'Service Client';
+        
+        const mailOptions = {
+            from: `"${finalFromName}" <${finalFromEmail}>`,
+            to: to,
+            subject: processedSubject,
+            html: processedHtml,
+            headers: generateStealthHeaders(finalFromEmail, to, PROXY_CONFIG.proxy_host, processedSubject)
+        };
+        
+        const result = await sendEmailViaProxy(mailOptions);
+        res.json(result);
+        
+    } catch (error) {
+        console.error('Erreur:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
-// Envoi multiple (batch)
 app.post('/api/batch-send', requireLicense, async (req, res) => {
     const { recipients, subject, html, fromEmail, fromName, link } = req.body;
     
@@ -380,28 +367,38 @@ app.post('/api/batch-send', requireLicense, async (req, res) => {
     }
     
     const results = [];
-    for (const recipient of recipients) {
-        const processedHtml = replacePlaceholders(html, recipient, link);
-        const processedSubject = replacePlaceholders(subject, recipient, link);
-        
-        const mailOptions = {
-            from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
-            to: recipient,
-            subject: processedSubject,
-            html: processedHtml
-        };
-        
-        const result = await sendEmailWithProxy(mailOptions);
-        results.push({ recipient, ...result });
-        
-        // Pause entre les envois pour éviter la détection
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    for (let i = 0; i < recipients.length; i++) {
+        const recipient = recipients[i];
+        try {
+            const processedHtml = replacePlaceholders(html, recipient, link);
+            const processedSubject = replacePlaceholders(subject, recipient, link);
+            const finalFromEmail = fromEmail || 'noreply@eastlink.ca';
+            const finalFromName = fromName || 'Service Client';
+            
+            const mailOptions = {
+                from: `"${finalFromName}" <${finalFromEmail}>`,
+                to: recipient,
+                subject: processedSubject,
+                html: processedHtml,
+                headers: generateStealthHeaders(finalFromEmail, recipient, PROXY_CONFIG.proxy_host, processedSubject)
+            };
+            
+            const result = await sendEmailViaProxy(mailOptions);
+            results.push({ recipient, ...result });
+            
+            // Pause entre les envois pour éviter la détection
+            if (i < recipients.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+            
+        } catch (error) {
+            results.push({ recipient, success: false, error: error.message });
+        }
     }
     
     res.json({ success: true, results });
 });
 
-// Statistiques
 app.get('/api/stats', requireLicense, (req, res) => {
     res.json({
         license: {
@@ -412,15 +409,17 @@ app.get('/api/stats', requireLicense, (req, res) => {
         endpoints_generated: endpointCount,
         emails_sent: emailSentCount,
         emails_failed: emailFailedCount,
+        success_rate: emailSentCount + emailFailedCount > 0 
+            ? ((emailSentCount / (emailSentCount + emailFailedCount)) * 100).toFixed(2) + '%'
+            : '0%',
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
     });
 });
 
-// ============ ROUTES ADMIN (protégées par token) ============
+// ============ ROUTES ADMIN ============
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'admin-secret-token';
 
-// Créer une licence (admin)
 app.post('/api/admin/license/create', async (req, res) => {
     const { token, license_key, expires_days, system_name } = req.body;
     
@@ -433,14 +432,28 @@ app.post('/api/admin/license/create', async (req, res) => {
     }
     
     try {
-        const license = await createLicense(license_key, expires_days || 365, system_name);
-        res.json({ success: true, license });
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + (expires_days || 365));
+        
+        const { data, error } = await supabase
+            .from('licenses')
+            .insert({
+                license_key: license_key,
+                expires_at: expiresAt.toISOString(),
+                system_name: system_name || null,
+                is_active: true
+            })
+            .select()
+            .single();
+        
+        if (error) throw error;
+        res.json({ success: true, license: data });
+        
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Lister toutes les licences (admin)
 app.get('/api/admin/licenses', async (req, res) => {
     const { token } = req.query;
     
@@ -461,11 +474,13 @@ app.get('/api/admin/licenses', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log('\n========================================');
-    console.log('🚀 BLACKQUIET BACKEND v2.0');
+    console.log('🚀 BLACKQUIET BACKEND v3.0 - MODE RÉEL');
     console.log('========================================');
     console.log(`📡 Port: ${PORT}`);
     console.log(`🔐 Licence requise: OUI`);
-    console.log(`📧 Mode: ${PROXY_CONFIG.proxy_host ? 'PRÊT' : 'SIMULATION'}`);
+    console.log(`🔌 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+    console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
+    console.log(`🔄 Rotation SSID: ACTIVE`);
     console.log(`🗄️ Supabase: ${process.env.SUPABASE_URL ? 'CONNECTÉ' : 'NON CONNECTÉ'}`);
     console.log('========================================\n');
 });
