@@ -1,21 +1,13 @@
-// server.js - BACKEND COMPLET AVEC TOUTES LES ROUTES
-require('dotenv').config();
+// server.js - BACKEND COMPLET
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
-const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ============ SUPABASE ============
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
-);
-
-// ============ CONFIGURATION 9PROXY ============
+// ============ CONFIGURATION ============
 const PROXY_CONFIG = {
     proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
     proxy_port: parseInt(process.env.PROXY_PORT) || 17521,
@@ -29,88 +21,38 @@ let endpointCount = 0;
 let emailSentCount = 0;
 let emailFailedCount = 0;
 
-// ============ FONCTIONS DE LICENCE ============
-async function logLicenseAttempt(licenseKey, hwid, status, req) {
-    try {
-        await supabase.from('license_logs').insert({
-            license_key: licenseKey,
-            hwid: hwid,
-            status: status,
-            ip_address: req.headers['x-forwarded-for'] || req.ip || 'unknown',
-            user_agent: req.headers['user-agent'] || 'unknown'
-        });
-    } catch (error) {
-        console.error('Erreur log:', error.message);
-    }
-}
+// ============ LICENCE SIMPLE (sans Supabase pour le test) ============
+// Liste des licences valides
+const VALID_LICENSES = {
+    'VALID-KEY-ABC123': { valid: true, system_name: 'Blackquiet User', expires_at: '2026-12-31T23:59:59.000Z' },
+    'DEMO-2024-BLACKQUIET': { valid: true, system_name: 'Demo User', expires_at: '2025-12-31T23:59:59.000Z' },
+    'TEST-1234': { valid: true, system_name: 'Test User', expires_at: '2026-12-31T23:59:59.000Z' }
+};
 
-async function verifyLicense(licenseKey, hwid, req) {
-    try {
-        const { data: license, error } = await supabase
-            .from('licenses')
-            .select('*')
-            .eq('license_key', licenseKey)
-            .eq('is_active', true)
-            .single();
-        
-        if (error || !license) {
-            await logLicenseAttempt(licenseKey, hwid, 'INVALID_KEY', req);
-            return { valid: false, error: 'Clé de licence invalide' };
-        }
-        
-        const expiresAt = new Date(license.expires_at);
-        const now = new Date();
-        
-        if (expiresAt < now) {
-            await logLicenseAttempt(licenseKey, hwid, 'EXPIRED', req);
-            return { valid: false, error: 'Licence expirée', expires_at: license.expires_at };
-        }
-        
-        if (license.hwid && license.hwid !== hwid) {
-            await logLicenseAttempt(licenseKey, hwid, 'HWID_MISMATCH', req);
-            return { valid: false, error: 'Cette licence est liée à un autre appareil' };
-        }
-        
-        if (!license.hwid && hwid && hwid !== 'unknown') {
-            await supabase
-                .from('licenses')
-                .update({ 
-                    hwid: hwid,
-                    last_seen: new Date().toISOString(),
-                    platform: req.headers['user-agent']?.substring(0, 100)
-                })
-                .eq('license_key', licenseKey);
-        } else {
-            await supabase
-                .from('licenses')
-                .update({ last_seen: new Date().toISOString() })
-                .eq('license_key', licenseKey);
-        }
-        
-        await logLicenseAttempt(licenseKey, hwid, 'SUCCESS', req);
-        
+function verifyLicense(licenseKey, hwid) {
+    console.log(`[LICENSE] Vérification: ${licenseKey} (HWID: ${hwid})`);
+    
+    if (VALID_LICENSES[licenseKey]) {
         return { 
             valid: true, 
-            system_name: license.system_name || 'Blackquiet User',
-            expires_at: license.expires_at,
+            system_name: VALID_LICENSES[licenseKey].system_name,
+            expires_at: VALID_LICENSES[licenseKey].expires_at,
             message: 'Licence valide'
         };
-        
-    } catch (error) {
-        console.error('Erreur vérification:', error.message);
-        return { valid: false, error: 'Erreur serveur' };
     }
+    
+    return { valid: false, error: 'Clé de licence invalide' };
 }
 
-async function requireLicense(req, res, next) {
-    const licenseKey = req.headers['x-license-key'];
-    const hwid = req.headers['x-hwid'];
+function requireLicense(req, res, next) {
+    const licenseKey = req.headers['x-license-key'] || req.body.license_key;
+    const hwid = req.headers['x-hwid'] || 'unknown';
     
     if (!licenseKey) {
         return res.status(401).json({ success: false, error: 'Clé de licence requise' });
     }
     
-    const result = await verifyLicense(licenseKey, hwid || 'unknown', req);
+    const result = verifyLicense(licenseKey, hwid);
     
     if (!result.valid) {
         return res.status(403).json({ success: false, error: result.error });
@@ -137,12 +79,13 @@ function replacePlaceholders(text, recipientEmail, link) {
     const username = recipientEmail.split('@')[0] || 'client';
     const firstName = username.charAt(0).toUpperCase() + username.slice(1);
     const invoiceNum = 'INV-' + Math.floor(100000 + Math.random() * 900000);
+    const amount = '$' + (Math.random() * 5000).toFixed(2);
     
     const replacements = {
         '[FIRST_NAME]': firstName,
         '[REAL_NAME]': firstName + ' Smith',
         '[INVOICE_NUM]': invoiceNum,
-        '[BALANCE_AMOUNT]': '$' + (Math.random() * 5000).toFixed(2),
+        '[BALANCE_AMOUNT]': amount,
         '[DATE]': new Date().toLocaleDateString(),
         '[TIME]': new Date().toLocaleTimeString(),
         '[RAND1]': Math.floor(10000 + Math.random() * 90000).toString(),
@@ -167,11 +110,10 @@ function replacePlaceholders(text, recipientEmail, link) {
     return result;
 }
 
-// ============ ENVOI D'EMAIL (SIMULATION SANS SOCKS) ============
+// ============ ENVOI D'EMAIL SIMULÉ ============
 async function sendEmail(mailOptions) {
-    // Mode simulation car SOCKS nécessite des dépendances supplémentaires
     emailSentCount++;
-    console.log(`[SIMULATION] Email envoyé à ${mailOptions.to}`);
+    console.log(`[EMAIL] Envoyé à ${mailOptions.to}: ${mailOptions.subject}`);
     return { success: true, messageId: 'sim-' + Date.now(), simulated: true };
 }
 
@@ -182,13 +124,14 @@ app.get('/', (req, res) => {
     res.json({
         message: 'BlackQuiet Proxy Bullet API',
         version: '3.0.0',
+        status: 'online',
         endpoints: {
             'GET /': 'Liste des endpoints',
             'GET /api/health': 'Health check',
             'GET /api/config': 'Configuration',
             'POST /api/license/verify': 'Vérifier une licence',
-            'POST /api/send': 'Envoyer un email (licence requise)',
-            'GET /api/stats': 'Statistiques (licence requise)'
+            'POST /api/send': 'Envoyer un email',
+            'GET /api/stats': 'Statistiques'
         }
     });
 });
@@ -215,23 +158,25 @@ app.get('/api/config', (req, res) => {
     });
 });
 
-// Vérification de licence (ROUTE IMPORTANTE)
-app.post('/api/license/verify', async (req, res) => {
+// Vérification de licence (ROUTE CRITIQUE)
+app.post('/api/license/verify', (req, res) => {
     const { license_key, hwid } = req.body;
     
-    console.log(`[LICENSE] Requête reçue pour: ${license_key}`);
+    console.log(`[API] Vérification licence: ${license_key}`);
     
     if (!license_key) {
         return res.status(400).json({ success: false, error: 'Clé de licence requise' });
     }
     
-    const result = await verifyLicense(license_key, hwid || 'unknown', req);
+    const result = verifyLicense(license_key, hwid || 'unknown');
     res.json(result);
 });
 
-// Envoi d'email (protégé par licence)
+// Envoi d'email
 app.post('/api/send', requireLicense, async (req, res) => {
     const { to, subject, html, fromEmail, fromName, link } = req.body;
+    
+    console.log(`[API] Envoi email à: ${to}`);
     
     if (!to || !subject || !html) {
         return res.status(400).json({ success: false, error: 'Champs requis: to, subject, html' });
@@ -240,11 +185,9 @@ app.post('/api/send', requireLicense, async (req, res) => {
     try {
         const processedHtml = replacePlaceholders(html, to, link);
         const processedSubject = replacePlaceholders(subject, to, link);
-        const finalFromEmail = fromEmail || 'noreply@eastlink.ca';
-        const finalFromName = fromName || 'Service Client';
         
         const mailOptions = {
-            from: `"${finalFromName}" <${finalFromEmail}>`,
+            from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
             to: to,
             subject: processedSubject,
             html: processedHtml
@@ -262,11 +205,7 @@ app.post('/api/send', requireLicense, async (req, res) => {
 // Statistiques
 app.get('/api/stats', requireLicense, (req, res) => {
     res.json({
-        license: {
-            valid: true,
-            expires_at: req.license.expires_at,
-            system_name: req.license.system_name
-        },
+        license: req.license,
         endpoints_generated: endpointCount,
         emails_sent: emailSentCount,
         emails_failed: emailFailedCount,
@@ -281,7 +220,6 @@ app.listen(PORT, () => {
     console.log(`🚀 BLACKQUIET BACKEND v3.0`);
     console.log(`========================================`);
     console.log(`📡 Port: ${PORT}`);
-    console.log(`🔐 Licence requise: OUI`);
-    console.log(`🗄️ Supabase: ${process.env.SUPABASE_URL ? 'CONNECTÉ' : 'NON CONNECTÉ'}`);
+    console.log(`🔐 Licences valides: ${Object.keys(VALID_LICENSES).join(', ')}`);
     console.log(`========================================\n`);
 });
