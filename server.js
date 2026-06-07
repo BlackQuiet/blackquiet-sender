@@ -1,304 +1,218 @@
 // ============================================
-// BLACKQUIET PROXY BULLET - BACKEND v5.0
-// GESTION DES LICENCES DANS license.json
-// EXPIRATION 30 JOURS APRÈS ACTIVATION
+// BLACKQUIET PROXY BULLET - BACKEND PRODUCTION
+// AVEC SUPABASE - VERSION 5.0.0
 // ============================================
 
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
+const { SocksClient } = require('socks');
+const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
 
+// ============ INITIALISATION ============
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+// ============ SÉCURITÉ ============
+app.use(helmet());
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
+app.use(cors({
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    credentials: true
+}));
 
-// ============ CHEMINS DES FICHIERS ============
-const LICENSE_FILE = path.join(__dirname, 'license.json');
+// ============ RATE LIMITING ============
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requêtes par IP
+    message: { error: 'Trop de requêtes, veuillez réessayer plus tard' }
+});
+app.use('/api/', limiter);
 
-// ============ CHARGEMENT DES LICENCES ============
-function loadLicenses() {
-    try {
-        if (fs.existsSync(LICENSE_FILE)) {
-            const data = fs.readFileSync(LICENSE_FILE, 'utf8');
-            return JSON.parse(data);
-        } else {
-            // Créer le fichier avec des licences par défaut
-            const defaultLicenses = {
-                "VALID-KEY-ABC123": {
-                    license_key: "VALID-KEY-ABC123",
-                    system_name: "Blackquiet Pro User",
-                    activated_at: null,
-                    expires_at: null,
-                    is_active: false,
-                    hwid: null,
-                    created_at: new Date().toISOString()
-                },
-                "DEMO-2024-BLACKQUIET": {
-                    license_key: "DEMO-2024-BLACKQUIET",
-                    system_name: "Demo User",
-                    activated_at: new Date().toISOString(),
-                    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                    is_active: true,
-                    hwid: null,
-                    created_at: new Date().toISOString()
-                },
-                "TEST-1234": {
-                    license_key: "TEST-1234",
-                    system_name: "Test User",
-                    activated_at: null,
-                    expires_at: null,
-                    is_active: false,
-                    hwid: null,
-                    created_at: new Date().toISOString()
-                }
-            };
-            fs.writeFileSync(LICENSE_FILE, JSON.stringify(defaultLicenses, null, 4));
-            return defaultLicenses;
-        }
-    } catch (error) {
-        console.error('Erreur chargement licences:', error);
-        return {};
-    }
-}
+// ============ SUPABASE ============
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
 
-// ============ SAUVEGARDE DES LICENCES ============
-function saveLicenses(licenses) {
-    try {
-        fs.writeFileSync(LICENSE_FILE, JSON.stringify(licenses, null, 4));
-        return true;
-    } catch (error) {
-        console.error('Erreur sauvegarde licences:', error);
-        return false;
-    }
-}
-
-// ============ VÉRIFICATION D'EXPIRATION ============
-function isLicenseExpired(license) {
-    if (!license.is_active) return true;
-    if (!license.expires_at) return true;
-    const expiresAt = new Date(license.expires_at);
-    const now = new Date();
-    return expiresAt < now;
-}
-
-// ============ ACTIVATION DE LICENCE (30 JOURS) ============
-function activateLicense(licenseKey, hwid) {
-    const licenses = loadLicenses();
-    const license = licenses[licenseKey];
-    
-    if (!license) {
-        return { success: false, error: 'Clé de licence invalide' };
-    }
-    
-    // Vérifier si la licence est déjà active et non expirée
-    if (license.is_active && license.expires_at) {
-        const expired = isLicenseExpired(license);
-        if (!expired) {
-            return { 
-                success: false, 
-                error: 'Cette licence est déjà activée',
-                expires_at: license.expires_at
-            };
-        } else {
-            return { 
-                success: false, 
-                error: 'Licence expirée. Veuillez contacter votre fournisseur',
-                expired: true
-            };
-        }
-    }
-    
-    // Activer la licence pour 30 jours
-    const activatedAt = new Date();
-    const expiresAt = new Date(activatedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-    
-    license.activated_at = activatedAt.toISOString();
-    license.expires_at = expiresAt.toISOString();
-    license.is_active = true;
-    license.hwid = hwid;
-    
-    saveLicenses(licenses);
-    
-    return {
-        success: true,
-        message: 'Licence activée avec succès pour 30 jours',
-        expires_at: expiresAt.toISOString(),
-        system_name: license.system_name
-    };
-}
-
-// ============ VÉRIFICATION DE LICENCE ============
-function verifyLicense(licenseKey, hwid) {
-    const licenses = loadLicenses();
-    const license = licenses[licenseKey];
-    
-    if (!license) {
-        return { valid: false, error: 'Clé de licence invalide' };
-    }
-    
-    if (!license.is_active) {
-        return { 
-            valid: false, 
-            error: 'Licence non activée. Veuillez l\'activer d\'abord.',
-            needs_activation: true
-        };
-    }
-    
-    if (isLicenseExpired(license)) {
-        return { 
-            valid: false, 
-            error: 'Licence expirée. Veuillez contacter votre fournisseur',
-            expired: true,
-            expires_at: license.expires_at
-        };
-    }
-    
-    // Vérifier HWID si déjà lié
-    if (license.hwid && license.hwid !== hwid) {
-        return { 
-            valid: false, 
-            error: 'Cette licence est liée à un autre appareil'
-        };
-    }
-    
-    // Mettre à jour le HWID si nécessaire
-    if (!license.hwid && hwid) {
-        license.hwid = hwid;
-        saveLicenses(licenses);
-    }
-    
-    const daysLeft = Math.ceil((new Date(license.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-    
-    return {
-        valid: true,
-        system_name: license.system_name,
-        expires_at: license.expires_at,
-        days_left: daysLeft,
-        message: `Licence valide. Expire dans ${daysLeft} jour(s)`
-    };
-}
+// ============ CONFIGURATION 9PROXY ============
+const PROXY_CONFIG = {
+    proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
+    proxy_port: parseInt(process.env.PROXY_PORT) || 17521,
+    proxy_user_template: process.env.PROXY_USER || 'black_rIxx-country-CA-isp-as11260_eastlink',
+    proxy_pass: process.env.PROXY_PASS || 'Kouame07',
+    smtp_host: process.env.SMTP_HOST || 'smtp.eastlink.ca',
+    smtp_port: parseInt(process.env.SMTP_PORT) || 25
+};
 
 // ============ STATISTIQUES ============
-let emailSentCount = 0;
-let endpointCount = 0;
+let stats = {
+    emails_sent: 0,
+    emails_failed: 0,
+    endpoints_generated: 0,
+    start_time: new Date().toISOString()
+};
 
-// ============ ROUTES API ============
+// ============ FONCTIONS LICENCE SUPABASE ============
 
-// Route racine
-app.get('/', (req, res) => {
-    const licenses = loadLicenses();
-    const availableLicenses = Object.keys(licenses).map(key => ({
-        license_key: key,
-        system_name: licenses[key].system_name,
-        is_active: licenses[key].is_active,
-        expires_at: licenses[key].expires_at
-    }));
-    
-    res.json({
-        name: 'BlackQuiet Proxy Bullet API',
-        version: '5.0.0',
-        status: 'online',
-        mode: 'REAL',
-        message: 'Système de licence - 30 jours après activation',
-        available_licenses: availableLicenses
-    });
-});
-
-// Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        service: 'BlackQuiet Sender',
-        mode: 'REAL',
-        timestamp: new Date().toISOString(),
-        version: '5.0.0',
-        uptime: process.uptime()
-    });
-});
-
-// Configuration
-app.get('/api/config', (req, res) => {
-    res.json({
-        mode: 'REAL',
-        version: '5.0.0',
-        proxy_host: 'niceproxy.io:17521',
-        smtp_host: 'smtp.eastlink.ca:25',
-        license_duration_days: 30
-    });
-});
-
-// ============ ROUTES DE LICENCE ============
-
-// Activer une licence (première utilisation)
-app.post('/api/license/activate', (req, res) => {
-    const { license_key, hwid } = req.body;
-    
-    console.log(`[LICENSE] Activation demandée: ${license_key}`);
-    
-    if (!license_key) {
-        return res.status(400).json({ 
-            success: false, 
-            error: 'Clé de licence requise' 
+// Logger les activités de licence
+async function logLicenseActivity(licenseKey, hwid, action, status, req) {
+    try {
+        await supabase.from('license_logs').insert({
+            license_key: licenseKey,
+            hwid: hwid,
+            action: action,
+            status: status,
+            ip_address: req.headers['x-forwarded-for'] || req.ip || 'unknown',
+            user_agent: req.headers['user-agent'] || 'unknown'
         });
+    } catch (error) {
+        console.error('Erreur log:', error.message);
     }
-    
-    const result = activateLicense(license_key, hwid || 'unknown');
-    
-    if (result.success) {
-        console.log(`[LICENSE] ✅ Activée: ${license_key} - Expire: ${result.expires_at}`);
-        res.json(result);
-    } else {
-        console.log(`[LICENSE] ❌ Échec activation: ${license_key} - ${result.error}`);
-        res.status(403).json(result);
-    }
-});
+}
 
-// Vérifier une licence (à chaque requête)
-app.post('/api/license/verify', (req, res) => {
-    const { license_key, hwid } = req.body;
-    
-    console.log(`[LICENSE] Vérification: ${license_key}`);
-    
-    if (!license_key) {
-        return res.status(400).json({ 
-            valid: false, 
-            error: 'Clé de licence requise' 
-        });
+// Activer une licence (30 jours)
+async function activateLicense(licenseKey, hwid, req) {
+    try {
+        // 1. Vérifier si la licence existe
+        const { data: license, error } = await supabase
+            .from('licenses')
+            .select('*')
+            .eq('license_key', licenseKey)
+            .single();
+        
+        if (error || !license) {
+            await logLicenseActivity(licenseKey, hwid, 'ACTIVATE', 'INVALID_KEY', req);
+            return { success: false, error: 'Clé de licence invalide' };
+        }
+        
+        // 2. Vérifier si déjà active et non expirée
+        if (license.is_active && license.expires_at) {
+            const expiresAt = new Date(license.expires_at);
+            if (expiresAt > new Date()) {
+                await logLicenseActivity(licenseKey, hwid, 'ACTIVATE', 'ALREADY_ACTIVE', req);
+                return { 
+                    success: false, 
+                    error: 'Cette licence est déjà activée',
+                    expires_at: license.expires_at
+                };
+            }
+        }
+        
+        // 3. Activer pour 30 jours
+        const activatedAt = new Date();
+        const expiresAt = new Date(activatedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+        
+        const { data, error: updateError } = await supabase
+            .from('licenses')
+            .update({
+                activated_at: activatedAt.toISOString(),
+                expires_at: expiresAt.toISOString(),
+                is_active: true,
+                hwid: hwid,
+                last_seen: activatedAt.toISOString()
+            })
+            .eq('license_key', licenseKey)
+            .select()
+            .single();
+        
+        if (updateError) {
+            await logLicenseActivity(licenseKey, hwid, 'ACTIVATE', 'ERROR', req);
+            return { success: false, error: updateError.message };
+        }
+        
+        await logLicenseActivity(licenseKey, hwid, 'ACTIVATE', 'SUCCESS', req);
+        
+        return {
+            success: true,
+            message: 'Licence activée avec succès pour 30 jours',
+            expires_at: expiresAt.toISOString(),
+            system_name: data.system_name
+        };
+        
+    } catch (error) {
+        console.error('Erreur activation:', error);
+        return { success: false, error: 'Erreur serveur' };
     }
-    
-    const result = verifyLicense(license_key, hwid || 'unknown');
-    
-    if (result.valid) {
-        console.log(`[LICENSE] ✅ Valide: ${license_key} - ${result.days_left} jours restants`);
-        res.json(result);
-    } else {
-        console.log(`[LICENSE] ❌ Invalide: ${license_key} - ${result.error}`);
-        res.status(403).json(result);
-    }
-});
+}
 
-// Middleware de vérification de licence pour les routes protégées
-function requireLicense(req, res, next) {
+// Vérifier une licence
+async function verifyLicense(licenseKey, hwid, req) {
+    try {
+        const { data: license, error } = await supabase
+            .from('licenses')
+            .select('*')
+            .eq('license_key', licenseKey)
+            .single();
+        
+        if (error || !license) {
+            await logLicenseActivity(licenseKey, hwid, 'VERIFY', 'INVALID_KEY', req);
+            return { valid: false, error: 'Clé de licence invalide' };
+        }
+        
+        if (!license.is_active) {
+            await logLicenseActivity(licenseKey, hwid, 'VERIFY', 'NOT_ACTIVE', req);
+            return { valid: false, error: 'Licence non activée', needs_activation: true };
+        }
+        
+        const expiresAt = new Date(license.expires_at);
+        if (expiresAt < new Date()) {
+            await logLicenseActivity(licenseKey, hwid, 'VERIFY', 'EXPIRED', req);
+            return { 
+                valid: false, 
+                error: 'Licence expirée. Veuillez contacter votre fournisseur', 
+                expired: true 
+            };
+        }
+        
+        if (license.hwid && license.hwid !== hwid) {
+            await logLicenseActivity(licenseKey, hwid, 'VERIFY', 'HWID_MISMATCH', req);
+            return { valid: false, error: 'Cette licence est liée à un autre appareil' };
+        }
+        
+        const daysLeft = Math.ceil((expiresAt - new Date()) / (1000 * 60 * 60 * 24));
+        
+        // Mettre à jour last_seen
+        await supabase
+            .from('licenses')
+            .update({ last_seen: new Date().toISOString() })
+            .eq('license_key', licenseKey);
+        
+        await logLicenseActivity(licenseKey, hwid, 'VERIFY', 'SUCCESS', req);
+        
+        return {
+            valid: true,
+            system_name: license.system_name,
+            expires_at: license.expires_at,
+            days_left: daysLeft
+        };
+        
+    } catch (error) {
+        console.error('Erreur vérification:', error);
+        return { valid: false, error: 'Erreur serveur' };
+    }
+}
+
+// Middleware de vérification de licence
+async function requireLicense(req, res, next) {
     const licenseKey = req.headers['x-license-key'];
     const hwid = req.headers['x-hwid'];
     
     if (!licenseKey) {
-        return res.status(401).json({ 
-            success: false, 
-            error: 'Clé de licence requise' 
-        });
+        return res.status(401).json({ success: false, error: 'Clé de licence requise' });
     }
     
-    const result = verifyLicense(licenseKey, hwid || 'unknown');
+    const result = await verifyLicense(licenseKey, hwid || 'unknown', req);
     
     if (!result.valid) {
         return res.status(403).json({ 
             success: false, 
-            error: result.error,
+            error: result.error, 
             expired: result.expired || false,
             needs_activation: result.needs_activation || false
         });
@@ -308,12 +222,12 @@ function requireLicense(req, res, next) {
     next();
 }
 
-// ============ FONCTIONS UTILITAIRES ============
+// ============ FONCTIONS D'ENVOI D'EMAIL ============
 
-// Rotation SSID
+// Rotation SSID (identique au code original)
 function rotateProxySSID(username) {
     const newSsid = crypto.randomBytes(5).toString('hex').toUpperCase();
-    endpointCount++;
+    stats.endpoints_generated++;
     if (username.includes('-ssid-')) {
         return username.replace(/-ssid-[a-zA-Z0-9]+/, `-ssid-${newSsid}`);
     }
@@ -340,7 +254,7 @@ function replacePlaceholders(text, recipientEmail, link) {
         '[RAND1]': Math.floor(10000 + Math.random() * 90000).toString(),
         '[PATIENT_ID]': 'PT-' + Math.floor(100000 + Math.random() * 900000),
         '[DOCTOR_NAME]': 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
-        '[TRACKING_NUM]': '1Z' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+        '[TRACKING_NUM]': '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         '[VERIFICATION_CODE]': Math.floor(100000 + Math.random() * 900000).toString(),
         '[IP_ADDRESS]': '192.168.' + Math.floor(1 + Math.random() * 254),
         '[EMAIL]': recipientEmail,
@@ -359,41 +273,160 @@ function replacePlaceholders(text, recipientEmail, link) {
     return result;
 }
 
-// ============ ROUTES PROTÉGÉES ============
+// Génération des headers stealth
+function generateStealthHeaders(fromEmail, toEmail, proxyHost, subject) {
+    return {
+        'Date': new Date().toUTCString(),
+        'MIME-Version': '1.0',
+        'Content-Language': 'en-US',
+        'X-Priority': '3',
+        'X-Mailer': 'Microsoft Outlook 16.0',
+        'X-MimeOLE': 'Produced By Microsoft MimeOLE V16.0.0.0',
+        'X-MS-Exchange-Organization-AuthAs': 'Internal',
+        'X-MS-Exchange-Organization-AuthMechanism': '04',
+        'Thread-Topic': subject,
+        'X-Auto-Response-Suppress': 'All'
+    };
+}
 
-// Envoi d'email unique
-app.post('/api/send', requireLicense, (req, res) => {
+// Envoi d'email via tunnel SOCKS5
+async function sendEmailViaProxy(mailOptions) {
+    let socket = null;
+    try {
+        const rotatedUser = rotateProxySSID(PROXY_CONFIG.proxy_user_template);
+        
+        console.log(`[PROXY] Tunnel vers ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+        console.log(`[PROXY] Username: ${rotatedUser.substring(0, 60)}...`);
+        
+        const tunnel = await SocksClient.createConnection({
+            proxy: {
+                ipaddress: PROXY_CONFIG.proxy_host,
+                port: PROXY_CONFIG.proxy_port,
+                type: 5,
+                userId: rotatedUser,
+                password: PROXY_CONFIG.proxy_pass
+            },
+            destination: {
+                host: PROXY_CONFIG.smtp_host,
+                port: PROXY_CONFIG.smtp_port
+            },
+            command: 'connect',
+            timeout: 30000
+        });
+        
+        socket = tunnel.socket;
+        
+        const transporter = nodemailer.createTransport({
+            host: PROXY_CONFIG.smtp_host,
+            port: PROXY_CONFIG.smtp_port,
+            secure: PROXY_CONFIG.smtp_port === 465,
+            ignoreTLS: PROXY_CONFIG.smtp_port === 25,
+            connection: socket,
+            tls: { rejectUnauthorized: false },
+            timeout: 30000
+        });
+        
+        const result = await transporter.sendMail(mailOptions);
+        transporter.close();
+        
+        stats.emails_sent++;
+        console.log(`[SUCCÈS] Email envoyé à ${mailOptions.to}`);
+        
+        return { success: true, messageId: result.messageId };
+        
+    } catch (error) {
+        stats.emails_failed++;
+        console.error(`[ERREUR] ${error.message}`);
+        return { success: false, error: error.message };
+    } finally {
+        if (socket && !socket.destroyed) socket.end();
+    }
+}
+
+// ============ ROUTES API ============
+
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'OK',
+        service: 'BlackQuiet Sender',
+        mode: 'PRODUCTION',
+        database: 'Supabase',
+        timestamp: new Date().toISOString(),
+        version: '5.0.0',
+        uptime: process.uptime()
+    });
+});
+
+// Configuration
+app.get('/api/config', (req, res) => {
+    res.json({
+        mode: 'PRODUCTION',
+        version: '5.0.0',
+        database: 'Supabase',
+        proxy_host: PROXY_CONFIG.proxy_host,
+        smtp_host: PROXY_CONFIG.smtp_host,
+        license_duration_days: 30
+    });
+});
+
+// Activer une licence
+app.post('/api/license/activate', async (req, res) => {
+    const { license_key, hwid } = req.body;
+    
+    console.log(`[LICENSE] Activation demandée: ${license_key}`);
+    
+    if (!license_key) {
+        return res.status(400).json({ success: false, error: 'Clé de licence requise' });
+    }
+    
+    const result = await activateLicense(license_key, hwid || 'unknown', req);
+    res.json(result);
+});
+
+// Vérifier une licence
+app.post('/api/license/verify', async (req, res) => {
+    const { license_key, hwid } = req.body;
+    
+    console.log(`[LICENSE] Vérification: ${license_key}`);
+    
+    if (!license_key) {
+        return res.status(400).json({ valid: false, error: 'Clé de licence requise' });
+    }
+    
+    const result = await verifyLicense(license_key, hwid || 'unknown', req);
+    res.json(result);
+});
+
+// Envoyer un email (protégé par licence)
+app.post('/api/send', requireLicense, async (req, res) => {
     const { to, subject, html, fromEmail, fromName, link } = req.body;
     
     console.log(`[EMAIL] Envoi à: ${to}`);
     
     if (!to || !subject || !html) {
-        return res.status(400).json({ 
-            success: false, 
-            error: 'Champs requis: to, subject, html' 
-        });
+        return res.status(400).json({ success: false, error: 'Champs requis: to, subject, html' });
     }
     
     try {
         const processedHtml = replacePlaceholders(html, to, link);
         const processedSubject = replacePlaceholders(subject, to, link);
+        const finalFromEmail = fromEmail || 'noreply@eastlink.ca';
+        const finalFromName = fromName || 'Service Client';
         
-        emailSentCount++;
+        const mailOptions = {
+            from: `"${finalFromName}" <${finalFromEmail}>`,
+            to: to,
+            subject: processedSubject,
+            html: processedHtml,
+            headers: generateStealthHeaders(finalFromEmail, to, PROXY_CONFIG.proxy_host, processedSubject)
+        };
         
-        console.log(`[EMAIL] ✅ Envoyé à ${to}`);
-        
-        res.json({
-            success: true,
-            messageId: 'msg-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
-            simulated: false,
-            license: {
-                valid: true,
-                days_left: req.license.days_left
-            }
-        });
+        const result = await sendEmailViaProxy(mailOptions);
+        res.json(result);
         
     } catch (error) {
-        console.error(`[EMAIL] ❌ Erreur: ${error.message}`);
+        console.error(`[EMAIL] Erreur: ${error.message}`);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -413,11 +446,19 @@ app.post('/api/batch-send', requireLicense, async (req, res) => {
             const processedHtml = replacePlaceholders(html, recipient, link);
             const processedSubject = replacePlaceholders(subject, recipient, link);
             
-            emailSentCount++;
-            results.push({ recipient, success: true, messageId: 'msg-' + Date.now() });
+            const mailOptions = {
+                from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
+                to: recipient,
+                subject: processedSubject,
+                html: processedHtml,
+                headers: generateStealthHeaders(fromEmail, recipient, PROXY_CONFIG.proxy_host, processedSubject)
+            };
+            
+            const result = await sendEmailViaProxy(mailOptions);
+            results.push({ recipient, ...result });
             
             if (i < recipients.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
             
         } catch (error) {
@@ -428,7 +469,7 @@ app.post('/api/batch-send', requireLicense, async (req, res) => {
     res.json({ success: true, results, total: results.length });
 });
 
-// Statistiques
+// Statistiques (protégé par licence)
 app.get('/api/stats', requireLicense, (req, res) => {
     res.json({
         license: {
@@ -437,70 +478,54 @@ app.get('/api/stats', requireLicense, (req, res) => {
             expires_at: req.license.expires_at,
             days_left: req.license.days_left
         },
-        emails_sent: emailSentCount,
-        endpoints_generated: endpointCount,
+        emails_sent: stats.emails_sent,
+        emails_failed: stats.emails_failed,
+        endpoints_generated: stats.endpoints_generated,
         uptime: process.uptime(),
+        start_time: stats.start_time,
         timestamp: new Date().toISOString()
     });
 });
 
-// ============ ROUTE ADMIN POUR VOIR LES LICENCES ============
-app.get('/api/admin/licenses', (req, res) => {
+// Route racine
+app.get('/', (req, res) => {
+    res.json({
+        name: 'BlackQuiet Proxy Bullet API',
+        version: '5.0.0',
+        status: 'online',
+        mode: 'PRODUCTION',
+        database: 'Supabase',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Route admin pour voir les licences (protégée par token)
+app.get('/api/admin/licenses', async (req, res) => {
     const adminToken = req.headers['x-admin-token'];
     
-    // Token simple pour admin (à changer en production)
-    if (adminToken !== 'admin123') {
+    if (adminToken !== process.env.ADMIN_TOKEN) {
         return res.status(403).json({ error: 'Accès non autorisé' });
     }
     
-    const licenses = loadLicenses();
-    const formattedLicenses = Object.keys(licenses).map(key => ({
-        license_key: key,
-        system_name: licenses[key].system_name,
-        is_active: licenses[key].is_active,
-        activated_at: licenses[key].activated_at,
-        expires_at: licenses[key].expires_at,
-        hwid: licenses[key].hwid,
-        status: licenses[key].is_active && licenses[key].expires_at ? 
-            (new Date(licenses[key].expires_at) > new Date() ? 'Active' : 'Expirée') : 
-            'Inactive'
-    }));
+    const { data, error } = await supabase
+        .from('licenses')
+        .select('*')
+        .order('created_at', { ascending: false });
     
-    res.json({ licenses: formattedLicenses });
-});
-
-// Route 404
-app.use('*', (req, res) => {
-    res.status(404).json({
-        error: 'Route non trouvée',
-        path: req.originalUrl
-    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ licenses: data });
 });
 
 // ============ DÉMARRAGE ============
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log('\n========================================');
-    console.log('🚀 BLACKQUIET BACKEND v5.0');
+    console.log('🚀 BLACKQUIET BACKEND - PRODUCTION');
     console.log('========================================');
     console.log(`📡 Port: ${PORT}`);
-    console.log(`📁 Fichier licence: ${LICENSE_FILE}`);
-    console.log(`🔐 Durée licence: 30 jours après activation`);
-    console.log(`📧 Mode: REAL`);
-    console.log('========================================\n');
-    
-    // Afficher les licences disponibles
-    const licenses = loadLicenses();
-    console.log('📋 Licences disponibles:');
-    Object.keys(licenses).forEach(key => {
-        const lic = licenses[key];
-        const status = lic.is_active && lic.expires_at ? 
-            (new Date(lic.expires_at) > new Date() ? '✅ Active' : '❌ Expirée') : 
-            '⏳ Inactive';
-        console.log(`   ${key} - ${lic.system_name} - ${status}`);
-        if (lic.expires_at && new Date(lic.expires_at) > new Date()) {
-            const daysLeft = Math.ceil((new Date(lic.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
-            console.log(`      Expire dans ${daysLeft} jours`);
-        }
-    });
+    console.log(`🔐 Mode: PRODUCTION`);
+    console.log(`🗄️ Base de données: Supabase`);
+    console.log(`📧 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+    console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
     console.log('========================================\n');
 });
