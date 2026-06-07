@@ -1,7 +1,7 @@
 {
   "name": "blackquiet-backend",
-  "version": "3.0.0",
-  "description": "BlackQuiet Proxy Bullet API",
+  "version": "4.0.0",
+  "description": "BlackQuiet Proxy Bullet - Backend réel avec SOCKS5",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "nodemailer": "^6.9.7",
+    "socks": "^2.7.1",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
   }
 }
