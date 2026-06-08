@@ -552,12 +552,13 @@ app.get('/', (req, res) => {
 // ============ DÉMARRAGE ============
 app.listen(PORT, () => {
     console.log('\n========================================');
-    console.log('🚀 BLACKQUIET BACKEND v6.0 - CORRIGÉ');
+    console.log('🚀 BLACKQUIET BACKEND v6.0 - COMPLET');
     console.log('========================================');
     console.log(`📡 Port: ${PORT}`);
     console.log(`🔌 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
     console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
     console.log(`🔄 Rotation SSID: ACTIVE`);
     console.log(`🛡️ Anti-détection: ACTIVE`);
+    console.log(`👤 Auteur: @BlackQuiet225`);
     console.log('========================================\n');
 });
