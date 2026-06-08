@@ -1,16 +1,19 @@
 {
-  "name": "blackquiet-backend",
-  "version": "5.0.0",
-  "description": "BlackQuiet Proxy Bullet - Backend Production",
+  "name": "blackquiet-backend-complete",
+  "version": "6.0.0",
+  "description": "BlackQuiet Proxy Bullet - Backend complet",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": "18.x"
-  },
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "nodemailer": "^6.9.7",
+    "socks": "^2.7.1",
+    "axios": "^1.6.2",
+    "puppeteer": "^21.6.0",
+    "html-to-docx": "^1.8.0",
+    "uuid": "^9.0.1"
   }
 }
