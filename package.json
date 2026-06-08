@@ -1,25 +1,41 @@
 {
-  "name": "blackquiet-backend-pro",
+  "name": "blackquiet-proxy-bullet",
   "version": "6.0.0",
-  "description": "BlackQuiet Proxy Bullet - Version Complète avec 9Proxy",
+  "description": "BLACKQUIET PROXY BULLET - Plateforme complète d'envoi d'emails avec tunnel SOCKS5, rotation SSID et anti-détection",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "email",
+    "socks5",
+    "proxy",
+    "smtp",
+    "anti-detection",
+    "blackquiet",
+    "email-marketing",
+    "rotation-ssid"
+  ],
+  "author": "@BlackQuiet225",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "html-to-docx": "^1.8.0",
+    "nodemailer": "^6.9.7",
+    "pdfkit": "^0.14.0",
+    "puppeteer": "^21.6.1",
+    "socks": "^2.7.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": "18.x"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "nodemailer": "^6.9.7",
-    "socks": "^2.7.1",
-    "axios": "^1.6.2",
-    "puppeteer": "^21.6.0",
-    "pdfkit": "^0.14.0",
-    "html-to-docx": "^1.8.0",
-    "cheerio": "^1.0.0-rc.12",
-    "crypto": "^1.0.1",
-    "dotenv": "^16.3.1"
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
   }
 }
